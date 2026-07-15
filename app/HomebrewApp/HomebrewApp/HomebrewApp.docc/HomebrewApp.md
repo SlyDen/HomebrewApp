@@ -1,0 +1,58 @@
+# ``HomebrewApp``
+
+Manage installed Homebrew packages from a native SwiftUI app.
+
+@Metadata {
+    @DisplayName("HomebrewApp")
+    @TechnologyRoot
+}
+
+## Overview
+
+HomebrewApp is a macOS package browser for Homebrew installations. It loads cached package data from SwiftData for quick startup, refreshes live package information through the Homebrew command-line tool, and exposes package maintenance actions from a split-view interface.
+
+![HomebrewApp package browser showing installed formulae, casks, package details, and the console dock.](package-browser.png)
+
+Use HomebrewApp to:
+
+- Browse installed formulae and casks with searchable names, summaries, version counts, and package categories.
+- Inspect package details including homepage links, install dates, identifiers, and installed versions.
+- Run package actions such as upgrade, reinstall, force reinstall, delete, make active, and version-specific delete.
+- Watch refreshes and package operations in a color-coded console panel.
+- Export the current package inventory as formatted JSON.
+- Tune app appearance and active package providers from the macOS Settings window.
+
+## Topics
+
+### App Experience
+
+- <doc:BrowsingPackages>
+- <doc:ManagingPackages>
+- <doc:SettingsAndExport>
+
+### Core App Types
+
+- ``HomebrewAppApp``
+- ``ContentView``
+- ``PackageListView``
+- ``PackageDetailView``
+- ``AppSettingsView``
+
+### Package State
+
+- ``PackageLibrary``
+- ``InstalledPackageDTO``
+- ``InstalledVersionDTO``
+- ``ManagedPackageKind``
+- ``PackageLogEntry``
+- ``PackageLogLevel``
+
+### Services and Persistence
+
+- ``HomebrewServicing``
+- ``HomebrewServiceFactory``
+- ``HomebrewCLIService``
+- ``MockHomebrewService``
+- ``BrewPackage``
+- ``BrewVersion``
+- ``PackageExportDocument``
