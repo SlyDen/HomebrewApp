@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct PackageListView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var library: PackageLibrary
+    @Binding var appearancePreference: AppearancePreference
     @State private var isExporting = false
     @State private var exportDocument = PackageExportDocument()
 
@@ -38,7 +39,7 @@ struct PackageListView: View {
                 }
             }
             .navigationTitle("Homebrew")
-            .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
+            .navigationSplitViewColumnWidth(min: 300, ideal: 420, max: 520)
             .searchable(text: $library.searchText, prompt: "Search packages")
             .overlay {
                 if library.filteredPackages.isEmpty && !library.isLoading {
@@ -51,6 +52,10 @@ struct PackageListView: View {
             }
             .toolbar {
                 ToolbarItem {
+                    AppearancePreferenceMenu(appearancePreference: $appearancePreference)
+                }
+
+                ToolbarItem {
                     KindFilterMenu(selectedKind: $library.selectedKind)
                 }
 
@@ -58,7 +63,7 @@ struct PackageListView: View {
                     Button {
                         library.isLogPanelPresented.toggle()
                     } label: {
-                        Label(library.isLogPanelPresented ? "Hide Logs" : "Show Logs", systemImage: library.isLogPanelPresented ? "rectangle.bottomthird.inset.filled" : "rectangle.bottomthird.inset.filled.badge.plus")
+                        Label(library.isLogPanelPresented ? "Hide Logs" : "Show Logs", systemImage: library.isLogPanelPresented ? "rectangle.bottomthird.inset.filled" : "rectangle.bottomthird.inset.filled")
                     }
 
                     Button {
@@ -171,6 +176,29 @@ private struct PackageRow: View {
                 .symbolRenderingMode(.hierarchical)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Toolbar menu for selecting the app appearance.
+private struct AppearancePreferenceMenu: View {
+    /// Active app appearance preference.
+    @Binding var appearancePreference: AppearancePreference
+
+    /// Appearance menu body.
+    var body: some View {
+        Menu {
+            ForEach(AppearancePreference.allCases) { preference in
+                Button {
+                    appearancePreference = preference
+                    preference.apply()
+                } label: {
+                    Label(preference.title, systemImage: appearancePreference == preference ? "checkmark" : preference.systemImage)
+                }
+            }
+        } label: {
+            Label("Appearance", systemImage: appearancePreference.systemImage)
+        }
+        .help("Appearance")
     }
 }
 
@@ -526,6 +554,6 @@ private extension PackageLogLevel {
 }
 
 #Preview {
-    PackageListView(library: PackageLibrary(service: MockHomebrewService()))
+    PackageListView(library: PackageLibrary(service: MockHomebrewService()), appearancePreference: .constant(.system))
         .modelContainer(for: [BrewPackage.self, BrewVersion.self], inMemory: true)
 }
