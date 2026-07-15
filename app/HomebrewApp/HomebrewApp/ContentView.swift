@@ -6,11 +6,28 @@ import SwiftUI
 /// `ContentView` owns the observable `PackageLibrary` instance for the window and
 /// passes it into the package browser view hierarchy.
 struct ContentView: View {
+    @AppStorage(AppPreferenceKeys.appearancePreference) private var appearancePreferenceRawValue = AppearancePreference.system.rawValue
+    @AppStorage(AppPreferenceKeys.isHomebrewProviderEnabled) private var isHomebrewProviderEnabled = true
     @State private var library = PackageLibrary()
 
     /// Main view body containing the Homebrew package browser.
     var body: some View {
-        PackageListView(library: library)
+        PackageListView(
+            library: library,
+            isHomebrewProviderEnabled: $isHomebrewProviderEnabled
+        )
+        .appAppearance(appearancePreference)
+        .onAppear {
+            appearancePreference.apply()
+        }
+        .onChange(of: appearancePreferenceRawValue) { _, newRawValue in
+            (AppearancePreference(rawValue: newRawValue) ?? .system).apply()
+        }
+    }
+
+    /// Current appearance preference decoded from persisted storage.
+    private var appearancePreference: AppearancePreference {
+        AppearancePreference(rawValue: appearancePreferenceRawValue) ?? .system
     }
 }
 

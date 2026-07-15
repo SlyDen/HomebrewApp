@@ -30,6 +30,9 @@ final class PackageLibrary {
     /// Optional package-kind filter selected from the toolbar menu.
     var selectedKind: ManagedPackageKind?
 
+    /// Whether the list should only show packages with more than one installed version.
+    var showsOnlyMultipleVersions = false
+
     /// Whether a refresh or package action is currently in progress.
     var isLoading = false
 
@@ -54,14 +57,15 @@ final class PackageLibrary {
         appendLog(.info, "Package library ready", detail: "Waiting for cache load or refresh.")
     }
 
-    /// Packages after applying the selected kind filter and search text.
+    /// Packages after applying the selected kind, version-count, and search filters.
     var filteredPackages: [InstalledPackageDTO] {
         packages.filter { package in
             let matchesKind = selectedKind == nil || package.kind == selectedKind
+            let matchesVersionCount = !showsOnlyMultipleVersions || package.installedVersions.count > 1
             let matchesSearch = searchText.isEmpty
                 || package.name.localizedStandardContains(searchText)
                 || package.summary.localizedCaseInsensitiveContains(searchText)
-            return matchesKind && matchesSearch
+            return matchesKind && matchesVersionCount && matchesSearch
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
