@@ -59,6 +59,14 @@ jobs:
             --output-path "${output_path}" \
             --hosting-base-path "${hosting_base_path}"
 
+          cp "${GITHUB_WORKSPACE}/.github/pages/docc-root-route.js" \
+            "${output_path}/docc-root-route.js"
+
+          root_route_script_path="${hosting_base_path}/docc-root-route.js"
+          sed -i '' \
+            "s#</head>#<script src=\"${root_route_script_path}\"></script></head>#" \
+            "${output_path}/index.html"
+
           touch "${output_path}/.nojekyll"
 
       - name: Upload Pages artifact
