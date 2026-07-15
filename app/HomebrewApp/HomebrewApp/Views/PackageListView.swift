@@ -63,7 +63,10 @@ struct PackageListView: View {
             }
             .toolbar {
                 ToolbarItem {
-                    KindFilterMenu(selectedKind: $library.selectedKind)
+                    KindFilterMenu(
+                        selectedKind: $library.selectedKind,
+                        showsOnlyMultipleVersions: $library.showsOnlyMultipleVersions
+                    )
                 }
 
                 ToolbarItemGroup {
@@ -140,6 +143,9 @@ struct PackageListView: View {
         .onChange(of: library.selectedKind) { _, _ in
             library.repairSelection()
         }
+        .onChange(of: library.showsOnlyMultipleVersions) { _, _ in
+            library.repairSelection()
+        }
         .onChange(of: isHomebrewProviderEnabled) { _, isEnabled in
             if isEnabled {
                 library.repairSelection()
@@ -202,10 +208,13 @@ private struct PackageRow: View {
     }
 }
 
-/// Toolbar menu for filtering package results by kind.
+/// Toolbar menu for filtering package results.
 private struct KindFilterMenu: View {
     /// Currently selected package kind, or `nil` for all packages.
     @Binding var selectedKind: ManagedPackageKind?
+
+    /// Whether only packages with more than one installed version are shown.
+    @Binding var showsOnlyMultipleVersions: Bool
 
     /// Filter menu body.
     var body: some View {
@@ -222,6 +231,12 @@ private struct KindFilterMenu: View {
                 } label: {
                     Label(kind.title, systemImage: selectedKind == kind ? "checkmark" : kind.systemImage)
                 }
+            }
+
+            Divider()
+
+            Toggle(isOn: $showsOnlyMultipleVersions) {
+                Label("Multiple Versions", systemImage: "square.stack.3d.up")
             }
         } label: {
             Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
