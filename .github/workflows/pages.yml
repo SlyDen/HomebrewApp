@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-26
 
     steps:
       - name: Checkout
@@ -27,6 +27,7 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Build DocC archive
+        working-directory: app/HomebrewApp
         run: |
           set -euo pipefail
 
@@ -38,7 +39,8 @@ jobs:
             -scheme HomebrewApp \
             -destination 'generic/platform=macOS' \
             -derivedDataPath "${derived_data_path}" \
-            DOCC_HOSTING_BASE_PATH="/${repository_name}"
+            DOCC_HOSTING_BASE_PATH="/${repository_name}" \
+            CODE_SIGNING_ALLOWED=NO
 
           archive_path="$(find "${derived_data_path}" -type d -name 'HomebrewApp.doccarchive' -print -quit)"
           if [[ -z "${archive_path}" ]]; then
@@ -54,7 +56,7 @@ jobs:
           touch "${output_path}/.nojekyll"
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: ${{ runner.temp }}/site
 

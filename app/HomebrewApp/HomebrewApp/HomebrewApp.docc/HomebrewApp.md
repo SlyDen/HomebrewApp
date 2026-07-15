@@ -4,7 +4,6 @@ Manage installed Homebrew packages from a native SwiftUI app.
 
 @Metadata {
     @DisplayName("HomebrewApp")
-    @TechnologyRoot
 }
 
 ## Overview
