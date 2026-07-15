@@ -24,6 +24,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure Pages
+        id: pages
         uses: actions/configure-pages@v5
 
       - name: Build DocC archive
@@ -31,8 +32,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          repository_name="${GITHUB_REPOSITORY#*/}"
           derived_data_path="${RUNNER_TEMP}/DerivedData"
+          hosting_base_path="${{ steps.pages.outputs.base_path }}"
 
           # The hosted runner currently uses Xcode 26.5, which cannot open
           # Xcode 27's project object version. This checkout is ephemeral.
@@ -44,7 +45,7 @@ jobs:
             -scheme HomebrewApp \
             -destination 'generic/platform=macOS' \
             -derivedDataPath "${derived_data_path}" \
-            DOCC_HOSTING_BASE_PATH="/${repository_name}" \
+            DOCC_HOSTING_BASE_PATH="${hosting_base_path}" \
             CODE_SIGNING_ALLOWED=NO
 
           archive_path="$(find "${derived_data_path}" -type d -name 'HomebrewApp.doccarchive' -print -quit)"
@@ -56,7 +57,7 @@ jobs:
           output_path="${RUNNER_TEMP}/site"
           xcrun docc process-archive transform-for-static-hosting "${archive_path}" \
             --output-path "${output_path}" \
-            --hosting-base-path "/${repository_name}"
+            --hosting-base-path "${hosting_base_path}"
 
           touch "${output_path}/.nojekyll"
 
