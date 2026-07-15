@@ -32,6 +32,123 @@ enum ManagedPackageKind: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Severity/category for execution log entries shown in the bottom panel.
+enum PackageLogLevel: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// General informational message.
+    case info
+
+    /// State transition message.
+    case state
+
+    /// Command that is about to execute.
+    case command
+
+    /// Successful completion message.
+    case success
+
+    /// Recoverable warning or empty state.
+    case warning
+
+    /// Operation failure.
+    case error
+
+    /// Stable identity for SwiftUI lists.
+    var id: String { rawValue }
+
+    /// Human-readable label shown in the log panel.
+    var title: String {
+        switch self {
+        case .info: "Info"
+        case .state: "State"
+        case .command: "Command"
+        case .success: "Success"
+        case .warning: "Warning"
+        case .error: "Error"
+        }
+    }
+
+    /// SF Symbol shown next to the log level.
+    var systemImage: String {
+        switch self {
+        case .info: "info.circle"
+        case .state: "switch.2"
+        case .command: "terminal"
+        case .success: "checkmark.circle"
+        case .warning: "exclamationmark.triangle"
+        case .error: "xmark.octagon"
+        }
+    }
+}
+
+/// One execution log entry rendered in the bottom log panel.
+struct PackageLogEntry: Identifiable, Hashable, Sendable {
+    /// Stable identity for log rows.
+    let id: UUID
+
+    /// Time the entry was created.
+    let timestamp: Date
+
+    /// Severity/category that controls row color and iconography.
+    let level: PackageLogLevel
+
+    /// Short row title.
+    let title: String
+
+    /// Optional detailed output text.
+    let detail: String?
+
+    /// Creates a log row.
+    init(id: UUID = UUID(), timestamp: Date = .now, level: PackageLogLevel, title: String, detail: String? = nil) {
+        self.id = id
+        self.timestamp = timestamp
+        self.level = level
+        self.title = title
+        self.detail = detail
+    }
+}
+
+/// A user action that can be invoked for a whole package.
+///
+/// The action names intentionally mirror package-manager concepts rather than
+/// Homebrew command names so another service can map them to npm, cargo, or other
+/// tooling later.
+enum PackageAction: String, CaseIterable, Identifiable, Sendable {
+    /// Upgrade this package to the latest available version.
+    case upgrade
+
+    /// Reinstall this package using the package manager's default behavior.
+    case reinstall
+
+    /// Force a reinstall where the package manager supports overwriting artifacts.
+    case forceReinstall
+
+    /// Remove this package from the system.
+    case delete
+
+    /// Stable identity for SwiftUI menus and controls.
+    var id: String { rawValue }
+
+    /// Label shown in package action controls.
+    var title: String {
+        switch self {
+        case .upgrade: "Upgrade"
+        case .reinstall: "Reinstall"
+        case .forceReinstall: "Force Reinstall"
+        case .delete: "Delete"
+        }
+    }
+
+    /// SF Symbol shown next to the action label.
+    var systemImage: String {
+        switch self {
+        case .upgrade: "arrow.up.circle"
+        case .reinstall: "arrow.triangle.2.circlepath"
+        case .forceReinstall: "exclamationmark.arrow.triangle.2.circlepath"
+        case .delete: "trash"
+        }
+    }
+}
+
 /// A user action that can be invoked from an installed-version tag.
 ///
 /// The action names intentionally mirror package-manager concepts rather than
@@ -53,9 +170,9 @@ enum PackageVersionAction: String, CaseIterable, Identifiable, Sendable {
     /// Label shown in the version action menu.
     var title: String {
         switch self {
-        case .delete: "Delete"
+        case .delete: "Delete Version"
         case .makeActive: "Make Active"
-        case .update: "Update"
+        case .update: "Upgrade Package"
         }
     }
 
@@ -64,7 +181,7 @@ enum PackageVersionAction: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .delete: "trash"
         case .makeActive: "checkmark.circle"
-        case .update: "arrow.triangle.2.circlepath"
+        case .update: "arrow.up.circle"
         }
     }
 }

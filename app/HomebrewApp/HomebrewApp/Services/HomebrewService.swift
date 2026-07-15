@@ -23,12 +23,24 @@ protocol HomebrewServicing: Sendable {
     ///   - version: Version selected by the user.
     func makeVersionActive(packageName: String, version: String) async throws
 
-    /// Updates a package.
+    /// Upgrades a package.
     ///
     /// - Parameters:
     ///   - packageName: Package name or token.
     ///   - version: Optional selected version context.
     func update(packageName: String, version: String?) async throws
+
+    /// Reinstalls a package.
+    ///
+    /// - Parameters:
+    ///   - packageName: Package name or token.
+    ///   - force: Whether the package manager should overwrite existing artifacts.
+    func reinstall(packageName: String, force: Bool) async throws
+
+    /// Deletes a whole package from the system.
+    ///
+    /// - Parameter packageName: Package name or token.
+    func delete(packageName: String) async throws
 }
 
 /// Errors produced by the Homebrew service layer.
@@ -116,6 +128,12 @@ struct MockHomebrewService: HomebrewServicing {
 
     /// No-op sample update action.
     func update(packageName: String, version: String?) async throws {}
+
+    /// No-op sample reinstall action.
+    func reinstall(packageName: String, force: Bool) async throws {}
+
+    /// No-op sample delete action.
+    func delete(packageName: String) async throws {}
 }
 
 #if os(macOS)
@@ -153,6 +171,17 @@ struct HomebrewCLIService: HomebrewServicing {
     /// Runs `brew upgrade` for the selected package.
     func update(packageName: String, version: String?) async throws {
         _ = try await brewJSON(arguments: ["upgrade", packageName])
+    }
+
+    /// Runs `brew reinstall` for the selected package.
+    func reinstall(packageName: String, force: Bool) async throws {
+        let arguments = force ? ["reinstall", "--force", packageName] : ["reinstall", packageName]
+        _ = try await brewJSON(arguments: arguments)
+    }
+
+    /// Runs `brew uninstall` for the selected package.
+    func delete(packageName: String) async throws {
+        _ = try await brewJSON(arguments: ["uninstall", packageName])
     }
 
     /// Runs a Homebrew command and returns stdout as raw data.

@@ -8,7 +8,7 @@ import SwiftData
 ///
 /// - Loading cached package snapshots from SwiftData for quick startup.
 /// - Refreshing live package data through `HomebrewServicing`.
-/// - Preparing UI state such as filtering, selection, errors, and JSON export data.
+/// - Preparing UI state such as filtering, selection, errors, logs, and JSON export data.
 ///
 /// The type is main-actor isolated because SwiftUI observes it directly and
 /// because it reads and writes `ModelContext` values supplied by the view layer.
@@ -16,6 +16,7 @@ import SwiftData
 @Observable
 final class PackageLibrary {
     private let service: any HomebrewServicing
+    private let maximumLogCount = 500
 
     /// Current in-memory package snapshots rendered by the UI.
     var packages: [InstalledPackageDTO] = []
@@ -32,6 +33,12 @@ final class PackageLibrary {
     /// Whether a refresh or package action is currently in progress.
     var isLoading = false
 
+    /// Whether the bottom execution log panel is visible.
+    var isLogPanelPresented = true
+
+    /// Color-coded operation log entries shown in the bottom panel.
+    var logs: [PackageLogEntry] = []
+
     /// User-facing error message shown by the status bar.
     var errorMessage: String?
 
@@ -44,6 +51,7 @@ final class PackageLibrary {
     ///   omitted, `HomebrewServiceFactory` selects the platform service.
     init(service: (any HomebrewServicing)? = nil) {
         self.service = service ?? HomebrewServiceFactory.make()
+        appendLog(.info, "Package library ready", detail: "Waiting for cache load or refresh.")
     }
 
     /// Packages after applying the selected kind filter and search text.
@@ -71,11 +79,11 @@ final class PackageLibrary {
     ///
     /// - Parameter context: SwiftData model context provided by the view hierarchy.
     func loadCachedPackages(from context: ModelContext) throws {
+        appendLog(.state, "Loading cached packages", detail: "Reading SwiftData package cache.")
         let descriptor = FetchDescriptor<BrewPackage>(sortBy: [SortDescriptor(\BrewPackage.name)])
         packages = try context.fetch(descriptor).map { $0.snapshot() }
-        if selectedPackageID == nil {
-            selectedPackageID = filteredPackages.first?.id
-        }
+        repairSelection()
+        appendLog(.success, "Loaded cache", detail: "\(packages.count) packages available from local cache.")
     }
 
     /// Refreshes packages from the service and persists the resulting snapshot.
@@ -87,14 +95,53 @@ final class PackageLibrary {
     func refresh(from context: ModelContext) async {
         isLoading = true
         errorMessage = nil
+        appendLog(.state, "Refreshing package list", detail: "Fetching installed Homebrew packages.")
+        appendLog(.command, "Executing command", detail: "brew info --json=v2 --installed")
 
         do {
             let livePackages = try await service.installedPackages()
+            appendLog(.success, "Fetched package list", detail: "Homebrew returned \(livePackages.count) installed packages.")
             try upsert(livePackages, in: context)
             packages = livePackages.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            selectedPackageID = selectedPackageID ?? packages.first?.id
+            repairSelection()
+            appendLog(.success, "Package list refreshed", detail: "Cache and visible package list are up to date.")
         } catch {
             errorMessage = error.localizedDescription
+            appendLog(.error, "Refresh failed", detail: error.localizedDescription)
+        }
+
+        isLoading = false
+        appendLog(.state, "Idle", detail: "No package operation is currently running.")
+    }
+
+    /// Performs a package-level action through the service and refreshes state.
+    ///
+    /// - Parameters:
+    ///   - action: User-selected package action from the detail pane.
+    ///   - package: Package that should receive the action.
+    ///   - context: SwiftData model context used by the follow-up refresh.
+    func perform(_ action: PackageAction, package: InstalledPackageDTO, context: ModelContext) async {
+        isLoading = true
+        errorMessage = nil
+        appendLog(.state, "Starting \(action.title.lowercased())", detail: "Package: \(package.name)")
+        appendLog(.command, "Executing command", detail: command(for: action, package: package))
+
+        do {
+            switch action {
+            case .upgrade:
+                try await service.update(packageName: package.name, version: nil)
+            case .reinstall:
+                try await service.reinstall(packageName: package.name, force: false)
+            case .forceReinstall:
+                try await service.reinstall(packageName: package.name, force: true)
+            case .delete:
+                try await service.delete(packageName: package.name)
+            }
+            appendLog(.success, "\(action.title) completed", detail: "Refreshing package list after \(package.name).")
+            await refresh(from: context)
+        } catch {
+            errorMessage = error.localizedDescription
+            appendLog(.error, "\(action.title) failed", detail: error.localizedDescription)
         }
 
         isLoading = false
@@ -110,6 +157,8 @@ final class PackageLibrary {
     func perform(_ action: PackageVersionAction, package: InstalledPackageDTO, version: InstalledVersionDTO, context: ModelContext) async {
         isLoading = true
         errorMessage = nil
+        appendLog(.state, "Starting \(action.title.lowercased())", detail: "Package: \(package.name), version: \(version.version)")
+        appendLog(.command, "Executing command", detail: command(for: action, package: package, version: version))
 
         do {
             switch action {
@@ -120,9 +169,11 @@ final class PackageLibrary {
             case .update:
                 try await service.update(packageName: package.name, version: version.version)
             }
+            appendLog(.success, "\(action.title) completed", detail: "Refreshing package list after \(package.name) \(version.version).")
             await refresh(from: context)
         } catch {
             errorMessage = error.localizedDescription
+            appendLog(.error, "\(action.title) failed", detail: error.localizedDescription)
         }
 
         isLoading = false
@@ -133,11 +184,46 @@ final class PackageLibrary {
     /// The data is prepared here instead of inside `FileDocument` so encoding stays
     /// on the main actor with the observable state that owns the package snapshots.
     func prepareExport() {
+        appendLog(.state, "Preparing export", detail: "Encoding \(packages.count) packages as JSON.")
         let payload = PackageExportDocumentPayload(exportedAt: .now, packageManager: "homebrew", packages: packages)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         exportData = try? encoder.encode(payload)
+
+        if let exportData {
+            appendLog(.success, "Export ready", detail: "Prepared \(exportData.count.formatted()) bytes of JSON.")
+        } else {
+            appendLog(.error, "Export failed", detail: "The package list could not be encoded as JSON.")
+        }
+    }
+
+    /// Removes all current log entries.
+    func clearLogs() {
+        logs.removeAll()
+        appendLog(.info, "Logs cleared")
+    }
+
+    /// Keeps the selected package pointed at a visible package after filtering or refresh changes.
+    func repairSelection() {
+        if let selectedPackageID, filteredPackages.contains(where: { $0.id == selectedPackageID }) {
+            return
+        }
+
+        selectedPackageID = filteredPackages.first?.id
+        if let selectedPackageID {
+            appendLog(.state, "Selection changed", detail: selectedPackageID)
+        } else {
+            appendLog(.warning, "No package selected", detail: "The current filter has no visible packages.")
+        }
+    }
+
+    /// Appends one log row and trims older rows to keep memory bounded.
+    func appendLog(_ level: PackageLogLevel, _ title: String, detail: String? = nil) {
+        logs.append(PackageLogEntry(level: level, title: title, detail: detail))
+        if logs.count > maximumLogCount {
+            logs.removeFirst(logs.count - maximumLogCount)
+        }
     }
 
     /// Reconciles live package snapshots with the SwiftData cache.
@@ -149,6 +235,7 @@ final class PackageLibrary {
     ///   - incomingPackages: Live snapshots returned by the package service.
     ///   - context: SwiftData model context to mutate and save.
     private func upsert(_ incomingPackages: [InstalledPackageDTO], in context: ModelContext) throws {
+        appendLog(.state, "Updating local cache", detail: "Writing \(incomingPackages.count) package snapshots to SwiftData.")
         let existing = try context.fetch(FetchDescriptor<BrewPackage>())
         var existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
         let incomingIDs = Set(incomingPackages.map(\.id))
@@ -176,5 +263,32 @@ final class PackageLibrary {
         }
 
         try context.save()
+        appendLog(.success, "Local cache saved", detail: "SwiftData now mirrors the latest package list.")
+    }
+
+    /// User-facing command string for a package-level action.
+    private func command(for action: PackageAction, package: InstalledPackageDTO) -> String {
+        switch action {
+        case .upgrade:
+            "brew upgrade \(package.name)"
+        case .reinstall:
+            "brew reinstall \(package.name)"
+        case .forceReinstall:
+            "brew reinstall --force \(package.name)"
+        case .delete:
+            "brew uninstall \(package.name)"
+        }
+    }
+
+    /// User-facing command string for a version-level action.
+    private func command(for action: PackageVersionAction, package: InstalledPackageDTO, version: InstalledVersionDTO) -> String {
+        switch action {
+        case .delete:
+            "brew uninstall \(package.name)@\(version.version)"
+        case .makeActive:
+            "brew link --overwrite \(package.name)@\(version.version)"
+        case .update:
+            "brew upgrade \(package.name)"
+        }
     }
 }
