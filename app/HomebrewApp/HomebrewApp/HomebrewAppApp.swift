@@ -22,5 +22,11 @@ struct HomebrewAppApp: App {
         .commands {
             PackageCommands()
         }
+
+        #if os(macOS)
+        Settings {
+            AppSettingsView()
+        }
+        #endif
     }
 }

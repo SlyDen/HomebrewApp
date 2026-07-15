@@ -7,6 +7,7 @@ import SwiftUI
 /// version actions delegated back to `PackageLibrary`.
 struct PackageDetailView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appAppearancePreference) private var appearancePreference
 
     /// Package snapshot displayed by this detail panel.
     let package: InstalledPackageDTO
@@ -61,6 +62,8 @@ struct PackageDetailView: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(appearancePreference.palette.editor)
         .navigationTitle(package.name)
     }
 }

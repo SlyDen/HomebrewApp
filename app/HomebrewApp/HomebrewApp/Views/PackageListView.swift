@@ -9,8 +9,9 @@ import UniformTypeIdentifiers
 /// execution log controls through native SwiftUI toolbars.
 struct PackageListView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.appAppearancePreference) private var appearancePreference
     @Bindable var library: PackageLibrary
-    @Binding var appearancePreference: AppearancePreference
+    @Binding var isHomebrewProviderEnabled: Bool
     @State private var isExporting = false
     @State private var exportDocument = PackageExportDocument()
 
@@ -24,7 +25,7 @@ struct PackageListView: View {
                     } label: {
                         Label(library.isLoading ? "Refreshing" : "Refresh Packages", systemImage: "arrow.clockwise")
                     }
-                    .disabled(library.isLoading)
+                    .disabled(library.isLoading || !isHomebrewProviderEnabled)
 
                     Spacer(minLength: 0)
                 }
@@ -33,16 +34,26 @@ struct PackageListView: View {
 
                 Divider()
 
-                List(library.filteredPackages, selection: $library.selectedPackageID) { package in
+                List(displayedPackages, selection: $library.selectedPackageID) { package in
                     PackageRow(package: package)
                         .tag(package.id)
+                        .listRowBackground(appearancePreference.palette.sidebar.opacity(0.62))
                 }
+                .scrollContentBackground(.hidden)
+                .background(appearancePreference.palette.sidebar)
             }
+            .background(appearancePreference.palette.sidebar)
             .navigationTitle("Homebrew")
             .navigationSplitViewColumnWidth(min: 300, ideal: 420, max: 520)
             .searchable(text: $library.searchText, prompt: "Search packages")
             .overlay {
-                if library.filteredPackages.isEmpty && !library.isLoading {
+                if !isHomebrewProviderEnabled {
+                    ContentUnavailableView(
+                        "No Active Providers",
+                        systemImage: "shippingbox.circle",
+                        description: Text("Enable Homebrew in Settings to refresh package data.")
+                    )
+                } else if displayedPackages.isEmpty && !library.isLoading {
                     ContentUnavailableView(
                         "No Packages",
                         systemImage: "shippingbox",
@@ -51,10 +62,6 @@ struct PackageListView: View {
                 }
             }
             .toolbar {
-                ToolbarItem {
-                    AppearancePreferenceMenu(appearancePreference: $appearancePreference)
-                }
-
                 ToolbarItem {
                     KindFilterMenu(selectedKind: $library.selectedKind)
                 }
@@ -75,18 +82,18 @@ struct PackageListView: View {
                     } label: {
                         Label("Export", systemImage: "square.and.arrow.up")
                     }
-                    .disabled(library.packages.isEmpty)
+                    .disabled(displayedPackages.isEmpty)
 
                     Button {
                         refreshPackages()
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
-                    .disabled(library.isLoading)
+                    .disabled(library.isLoading || !isHomebrewProviderEnabled)
                 }
             }
         } detail: {
-            if let package = library.selectedPackage {
+            if let package = selectedPackage {
                 PackageDetailView(package: package, library: library)
                     .navigationSplitViewColumnWidth(min: 420, ideal: 760)
             } else {
@@ -111,7 +118,7 @@ struct PackageListView: View {
         }
         .focusedSceneValue(
             \.refreshPackagesAction,
-            RefreshPackagesAction(isDisabled: library.isLoading) {
+            RefreshPackagesAction(isDisabled: library.isLoading || !isHomebrewProviderEnabled) {
                 refreshPackages()
             }
         )
@@ -123,7 +130,7 @@ struct PackageListView: View {
                 library.appendLog(.error, "Cache load failed", detail: error.localizedDescription)
             }
 
-            if library.packages.isEmpty {
+            if library.packages.isEmpty && isHomebrewProviderEnabled {
                 await library.refresh(from: modelContext)
             }
         }
@@ -132,6 +139,11 @@ struct PackageListView: View {
         }
         .onChange(of: library.selectedKind) { _, _ in
             library.repairSelection()
+        }
+        .onChange(of: isHomebrewProviderEnabled) { _, isEnabled in
+            if isEnabled {
+                library.repairSelection()
+            }
         }
         .fileExporter(
             isPresented: $isExporting,
@@ -146,8 +158,19 @@ struct PackageListView: View {
         }
     }
 
+    /// Packages visible for currently active providers.
+    private var displayedPackages: [InstalledPackageDTO] {
+        isHomebrewProviderEnabled ? library.filteredPackages : []
+    }
+
+    /// Selected package constrained to active providers.
+    private var selectedPackage: InstalledPackageDTO? {
+        isHomebrewProviderEnabled ? library.selectedPackage : nil
+    }
+
     /// Starts a manual refresh using the active SwiftData context.
     private func refreshPackages() {
+        guard isHomebrewProviderEnabled else { return }
         Task { await library.refresh(from: modelContext) }
     }
 }
@@ -176,29 +199,6 @@ private struct PackageRow: View {
                 .symbolRenderingMode(.hierarchical)
         }
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// Toolbar menu for selecting the app appearance.
-private struct AppearancePreferenceMenu: View {
-    /// Active app appearance preference.
-    @Binding var appearancePreference: AppearancePreference
-
-    /// Appearance menu body.
-    var body: some View {
-        Menu {
-            ForEach(AppearancePreference.allCases) { preference in
-                Button {
-                    appearancePreference = preference
-                    preference.apply()
-                } label: {
-                    Label(preference.title, systemImage: appearancePreference == preference ? "checkmark" : preference.systemImage)
-                }
-            }
-        } label: {
-            Label("Appearance", systemImage: appearancePreference.systemImage)
-        }
-        .help("Appearance")
     }
 }
 
@@ -554,6 +554,9 @@ private extension PackageLogLevel {
 }
 
 #Preview {
-    PackageListView(library: PackageLibrary(service: MockHomebrewService()), appearancePreference: .constant(.system))
+    PackageListView(
+        library: PackageLibrary(service: MockHomebrewService()),
+        isHomebrewProviderEnabled: .constant(true)
+    )
         .modelContainer(for: [BrewPackage.self, BrewVersion.self], inMemory: true)
 }
