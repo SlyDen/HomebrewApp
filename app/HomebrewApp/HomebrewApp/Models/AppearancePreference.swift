@@ -256,6 +256,36 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
             nil
         }
     }
+
+    /// Asset catalog image used for the app and Dock icon under this preference.
+    fileprivate var appIconImageName: String {
+        switch self {
+        case .system:
+            "HomebrewIconSystem"
+        case .light:
+            "HomebrewIconLight"
+        case .dark:
+            "HomebrewIconDark"
+        case .standard:
+            "HomebrewIconStandard"
+        case .sakura:
+            "HomebrewIconSakura"
+        case .ember:
+            "HomebrewIconEmber"
+        case .sunrise:
+            "HomebrewIconSunrise"
+        case .midnight:
+            "HomebrewIconMidnight"
+        case .neonNoir:
+            "HomebrewIconNeonNoir"
+        case .cobalt:
+            "HomebrewIconCobalt"
+        case .coralReef:
+            "HomebrewIconCoralReef"
+        case .emerald:
+            "HomebrewIconEmerald"
+        }
+    }
     #endif
 
     /// Applies the selected appearance to the app and any windows already on screen.
@@ -268,6 +298,9 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
             window.appearance = appearance
             window.contentView?.needsDisplay = true
             window.viewsNeedDisplay = true
+        }
+        if let icon = NSImage(named: appIconImageName) {
+            NSApp.applicationIconImage = icon
         }
         #endif
     }
