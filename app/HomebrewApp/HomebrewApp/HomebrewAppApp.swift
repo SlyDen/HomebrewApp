@@ -13,5 +13,14 @@ struct HomebrewAppApp: App {
             ContentView()
         }
         .modelContainer(for: [BrewPackage.self, BrewVersion.self])
+        .defaultWindowPlacement { _, context in
+            let displayBounds = context.defaultDisplay.visibleRect
+            let size = CGSize(width: displayBounds.width * 2.0 / 3.0, height: displayBounds.height * 2.0 / 3.0)
+            let position = CGPoint(x: displayBounds.midX - size.width / 2.0, y: displayBounds.midY - size.height / 2.0)
+            return WindowPlacement(position, size: size)
+        }
+        .commands {
+            PackageCommands()
+        }
     }
 }

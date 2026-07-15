@@ -34,7 +34,7 @@ final class PackageLibrary {
     var isLoading = false
 
     /// Whether the bottom execution log panel is visible.
-    var isLogPanelPresented = true
+    var isLogPanelPresented = false
 
     /// Color-coded operation log entries shown in the bottom panel.
     var logs: [PackageLogEntry] = []

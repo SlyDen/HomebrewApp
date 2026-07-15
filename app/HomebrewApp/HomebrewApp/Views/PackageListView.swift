@@ -16,9 +16,26 @@ struct PackageListView: View {
     /// View body containing the searchable package list and detail pane.
     var body: some View {
         NavigationSplitView {
-            List(library.filteredPackages, selection: $library.selectedPackageID) { package in
-                PackageRow(package: package)
-                    .tag(package.id)
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        refreshPackages()
+                    } label: {
+                        Label(library.isLoading ? "Refreshing" : "Refresh Packages", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(library.isLoading)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+
+                Divider()
+
+                List(library.filteredPackages, selection: $library.selectedPackageID) { package in
+                    PackageRow(package: package)
+                        .tag(package.id)
+                }
             }
             .navigationTitle("Homebrew")
             .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
@@ -56,7 +73,7 @@ struct PackageListView: View {
                     .disabled(library.packages.isEmpty)
 
                     Button {
-                        Task { await library.refresh(from: modelContext) }
+                        refreshPackages()
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     }
@@ -87,6 +104,12 @@ struct PackageListView: View {
             }
             .animation(.easeInOut(duration: 0.18), value: library.isLogPanelPresented)
         }
+        .focusedSceneValue(
+            \.refreshPackagesAction,
+            RefreshPackagesAction(isDisabled: library.isLoading) {
+                refreshPackages()
+            }
+        )
         .task {
             do {
                 try library.loadCachedPackages(from: modelContext)
@@ -116,6 +139,11 @@ struct PackageListView: View {
                 library.appendLog(.error, "Export failed", detail: error.localizedDescription)
             }
         }
+    }
+
+    /// Starts a manual refresh using the active SwiftData context.
+    private func refreshPackages() {
+        Task { await library.refresh(from: modelContext) }
     }
 }
 
