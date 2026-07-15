@@ -34,6 +34,11 @@ jobs:
           repository_name="${GITHUB_REPOSITORY#*/}"
           derived_data_path="${RUNNER_TEMP}/DerivedData"
 
+          # The hosted runner currently uses Xcode 26.5, which cannot open
+          # Xcode 27's project object version. This checkout is ephemeral.
+          sed -i '' 's/^\tobjectVersion = 110;$/\tobjectVersion = 77;/' \
+            HomebrewApp.xcodeproj/project.pbxproj
+
           xcodebuild docbuild \
             -project HomebrewApp.xcodeproj \
             -scheme HomebrewApp \
