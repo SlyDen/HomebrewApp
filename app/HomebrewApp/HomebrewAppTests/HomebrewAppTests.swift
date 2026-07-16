@@ -131,6 +131,45 @@ struct HomebrewAppTests {
         #expect(service.recordedTrustCheckSettings == [true, true, true, true])
     }
 
+    @Test @MainActor func installsRegistryFormulaAndRefreshesPackages() async throws {
+        let installedFormula = InstalledPackageDTO(
+            name: "wget",
+            kind: .formula,
+            summary: "Internet file retriever",
+            homepage: nil,
+            installedVersions: [
+                InstalledVersionDTO(version: "1.25.0", isActive: true, installedOn: nil)
+            ],
+            installedOn: Date(timeIntervalSince1970: 0)
+        )
+        let service = RecordingHomebrewService(installedPackagesResult: [installedFormula])
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+        library.disablesTapTrustChecks = true
+
+        await library.installFormula(named: "wget", context: context)
+
+        #expect(service.recordedOperations == [.installFormula("wget"), .installedPackages])
+        #expect(service.recordedTrustCheckSettings == [true, true])
+        #expect(library.isFormulaInstalled(named: "wget"))
+        #expect(library.errorMessage == nil)
+        #expect(library.isLoading == false)
+        #expect(library.logs.contains { $0.title == "Formula installed" })
+    }
+
+    @Test @MainActor func doesNotRefreshPackagesWhenFormulaInstallationFails() async throws {
+        let service = RecordingHomebrewService(installError: TestServiceError.installFailed)
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+
+        await library.installFormula(named: "wget", context: context)
+
+        #expect(service.recordedOperations == [.installFormula("wget")])
+        #expect(library.errorMessage == TestServiceError.installFailed.localizedDescription)
+        #expect(library.isLoading == false)
+        #expect(library.logs.contains { $0.title == "Formula installation failed" })
+    }
+
     @Test func commandEnvironmentAppliesTapTrustPreference() {
         let inherited = [
             "HOMEBREW_NO_REQUIRE_TAP_TRUST": "1",
@@ -197,6 +236,7 @@ struct HomebrewAppTests {
 }
 
 private enum RecordedHomebrewOperation: Equatable, Sendable {
+    case installFormula(String)
     case updateHomebrew
     case upgradeAll
     case cleanup
@@ -204,11 +244,14 @@ private enum RecordedHomebrewOperation: Equatable, Sendable {
 }
 
 private enum TestServiceError: LocalizedError {
+    case installFailed
     case updateFailed
     case upgradeFailed
 
     var errorDescription: String? {
         switch self {
+        case .installFailed:
+            "The formula installation failed."
         case .updateFailed:
             "The Homebrew update failed."
         case .upgradeFailed:
@@ -223,16 +266,33 @@ private final class RecordingHomebrewService: HomebrewServicing {
     private(set) var recordedTrustCheckSettings: [Bool] = []
     private let updateError: (any Error)?
     private let upgradeError: (any Error)?
+    private let installError: (any Error)?
+    private let installedPackagesResult: [InstalledPackageDTO]
 
-    init(updateError: (any Error)? = nil, upgradeError: (any Error)? = nil) {
+    init(
+        updateError: (any Error)? = nil,
+        upgradeError: (any Error)? = nil,
+        installError: (any Error)? = nil,
+        installedPackagesResult: [InstalledPackageDTO] = []
+    ) {
         self.updateError = updateError
         self.upgradeError = upgradeError
+        self.installError = installError
+        self.installedPackagesResult = installedPackagesResult
     }
 
     func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO] {
         recordedOperations.append(.installedPackages)
         recordedTrustCheckSettings.append(disablesTapTrustChecks)
-        return []
+        return installedPackagesResult
+    }
+
+    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {
+        recordedOperations.append(.installFormula(packageName))
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+        if let installError {
+            throw installError
+        }
     }
 
     func updateHomebrew(disablesTapTrustChecks: Bool) async throws {

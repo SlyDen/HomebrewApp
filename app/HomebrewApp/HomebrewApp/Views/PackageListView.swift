@@ -76,6 +76,10 @@ struct PackageListView: View {
                     )
                 }
 
+                ToolbarItem {
+                    PackageSortMenu(sortOption: $library.sortOption)
+                }
+
                 ToolbarItemGroup {
                     Button {
                         library.isLogPanelPresented.toggle()
@@ -148,7 +152,9 @@ struct PackageListView: View {
                 library.appendLog(.error, "Cache load failed", detail: error.localizedDescription)
             }
 
-            if library.packages.isEmpty && isHomebrewProviderEnabled {
+            let needsMetadataRefresh = library.packages.isEmpty
+                || library.packages.allSatisfy { $0.installedSize == nil }
+            if needsMetadataRefresh && isHomebrewProviderEnabled {
                 await library.refresh(from: modelContext)
             }
         }
@@ -207,33 +213,6 @@ struct PackageListView: View {
                 from: modelContext
             )
         }
-    }
-}
-
-/// Compact row for a package in the main list.
-private struct PackageRow: View {
-    /// Package snapshot rendered by the row.
-    let package: InstalledPackageDTO
-
-    /// Row body with package category icon, name, summary, and version count.
-    var body: some View {
-        Label {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(package.name)
-                    .font(.headline)
-                Text(package.summary)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Text("\(package.installedVersions.count) version\(package.installedVersions.count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        } icon: {
-            Image(systemName: package.kind.systemImage)
-                .symbolRenderingMode(.hierarchical)
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 
