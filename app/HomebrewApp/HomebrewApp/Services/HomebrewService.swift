@@ -7,40 +7,53 @@ import Foundation
 /// and feed `InstalledPackageDTO` snapshots into `PackageLibrary`.
 protocol HomebrewServicing: Sendable {
     /// Returns the packages currently installed by the backing package manager.
-    func installedPackages() async throws -> [InstalledPackageDTO]
+    func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO]
+
+    /// Fetches the newest Homebrew and formula metadata before package upgrades.
+    func updateHomebrew(disablesTapTrustChecks: Bool) async throws
+
+    /// Upgrades all outdated, unpinned packages.
+    ///
+    /// - Parameters:
+    ///   - disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
+    ///   - progress: Optional main-actor handler for concise command progress.
+    func upgradeAll(disablesTapTrustChecks: Bool, progress: HomebrewProgressHandler?) async throws
+
+    /// Removes outdated package versions and stale Homebrew cache files.
+    func cleanup(disablesTapTrustChecks: Bool) async throws
 
     /// Deletes a specific package version.
     ///
     /// - Parameters:
     ///   - packageName: Package name or token.
     ///   - version: Version selected by the user.
-    func deleteVersion(packageName: String, version: String) async throws
+    func deleteVersion(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws
 
     /// Makes a specific version active where the package manager supports it.
     ///
     /// - Parameters:
     ///   - packageName: Package name or token.
     ///   - version: Version selected by the user.
-    func makeVersionActive(packageName: String, version: String) async throws
+    func makeVersionActive(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws
 
     /// Upgrades a package.
     ///
     /// - Parameters:
     ///   - packageName: Package name or token.
     ///   - version: Optional selected version context.
-    func update(packageName: String, version: String?) async throws
+    func update(packageName: String, version: String?, disablesTapTrustChecks: Bool) async throws
 
     /// Reinstalls a package.
     ///
     /// - Parameters:
     ///   - packageName: Package name or token.
     ///   - force: Whether the package manager should overwrite existing artifacts.
-    func reinstall(packageName: String, force: Bool) async throws
+    func reinstall(packageName: String, force: Bool, disablesTapTrustChecks: Bool) async throws
 
     /// Deletes a whole package from the system.
     ///
     /// - Parameter packageName: Package name or token.
-    func delete(packageName: String) async throws
+    func delete(packageName: String, disablesTapTrustChecks: Bool) async throws
 }
 
 /// Errors produced by the Homebrew service layer.
@@ -54,6 +67,9 @@ enum HomebrewServiceError: LocalizedError {
     /// A command exceeded the service timeout and was terminated.
     case commandTimedOut(executablePath: String, arguments: [String], seconds: TimeInterval)
 
+    /// The temporary helper used by `sudo -A` could not be prepared.
+    case authenticationHelperFailed(message: String)
+
     /// Localized message suitable for the app's status bar.
     var errorDescription: String? {
         switch self {
@@ -63,6 +79,8 @@ enum HomebrewServiceError: LocalizedError {
             "\(executablePath) \(arguments.joined(separator: " ")) failed: \(message)"
         case .commandTimedOut(let executablePath, let arguments, let seconds):
             "\(executablePath) \(arguments.joined(separator: " ")) timed out after \(Int(seconds)) seconds."
+        case .authenticationHelperFailed(let message):
+            "Administrator authentication could not be prepared: \(message)"
         }
     }
 }
@@ -82,7 +100,7 @@ struct HomebrewServiceFactory {
 /// Sample package service used for previews and non-macOS builds.
 struct MockHomebrewService: HomebrewServicing {
     /// Returns deterministic sample data for UI previews and tests.
-    func installedPackages() async throws -> [InstalledPackageDTO] {
+    func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO] {
         let now = Date()
 
         return [
@@ -120,20 +138,31 @@ struct MockHomebrewService: HomebrewServicing {
         ]
     }
 
+    /// No-op sample Homebrew metadata update.
+    func updateHomebrew(disablesTapTrustChecks: Bool) async throws {}
+
+    /// No-op sample bulk upgrade action.
+    func upgradeAll(disablesTapTrustChecks: Bool, progress: HomebrewProgressHandler?) async throws {
+        progress?("Upgrading git")
+    }
+
+    /// No-op sample cleanup action.
+    func cleanup(disablesTapTrustChecks: Bool) async throws {}
+
     /// No-op sample delete action.
-    func deleteVersion(packageName: String, version: String) async throws {}
+    func deleteVersion(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws {}
 
     /// No-op sample activation action.
-    func makeVersionActive(packageName: String, version: String) async throws {}
+    func makeVersionActive(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws {}
 
     /// No-op sample update action.
-    func update(packageName: String, version: String?) async throws {}
+    func update(packageName: String, version: String?, disablesTapTrustChecks: Bool) async throws {}
 
     /// No-op sample reinstall action.
-    func reinstall(packageName: String, force: Bool) async throws {}
+    func reinstall(packageName: String, force: Bool, disablesTapTrustChecks: Bool) async throws {}
 
     /// No-op sample delete action.
-    func delete(packageName: String) async throws {}
+    func delete(packageName: String, disablesTapTrustChecks: Bool) async throws {}
 }
 
 #if os(macOS)
@@ -148,8 +177,11 @@ struct HomebrewCLIService: HomebrewServicing {
     /// The JSON command is slower than `brew list`, but it provides descriptions,
     /// homepage URLs, installed timestamps, and version metadata needed by the UI
     /// and export document.
-    func installedPackages() async throws -> [InstalledPackageDTO] {
-        let data = try await brewJSON(arguments: ["info", "--json=v2", "--installed"])
+    func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO] {
+        let data = try await brewJSON(
+            arguments: ["info", "--json=v2", "--installed"],
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
@@ -158,35 +190,94 @@ struct HomebrewCLIService: HomebrewServicing {
         return response.formulae.map { $0.package(kind: .formula) } + response.casks.map { $0.package(kind: .cask) }
     }
 
+    /// Runs `brew update` as the mandatory first phase of a bulk upgrade.
+    func updateHomebrew(disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["update"],
+            timeout: 30 * 60,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
+    }
+
+    /// Runs `brew upgrade --no-ask` for all outdated, unpinned packages.
+    func upgradeAll(disablesTapTrustChecks: Bool, progress: HomebrewProgressHandler?) async throws {
+        _ = try await brewJSON(
+            arguments: ["upgrade", "--no-ask"],
+            timeout: 60 * 60,
+            progress: progress,
+            allowsAdministratorAuthentication: true,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
+    }
+
+    /// Runs a full `brew cleanup` after a bulk upgrade when requested.
+    func cleanup(disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["cleanup"],
+            timeout: 15 * 60,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
+    }
+
     /// Runs `brew uninstall` for a version-specific package token.
-    func deleteVersion(packageName: String, version: String) async throws {
-        _ = try await brewJSON(arguments: ["uninstall", "\(packageName)@\(version)"])
+    func deleteVersion(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["uninstall", "\(packageName)@\(version)"],
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Runs `brew link --overwrite` for a version-specific package token.
-    func makeVersionActive(packageName: String, version: String) async throws {
-        _ = try await brewJSON(arguments: ["link", "--overwrite", "\(packageName)@\(version)"])
+    func makeVersionActive(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["link", "--overwrite", "\(packageName)@\(version)"],
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Runs `brew upgrade` for the selected package.
-    func update(packageName: String, version: String?) async throws {
-        _ = try await brewJSON(arguments: ["upgrade", packageName])
+    func update(packageName: String, version: String?, disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["upgrade", packageName],
+            allowsAdministratorAuthentication: true,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Runs `brew reinstall` for the selected package.
-    func reinstall(packageName: String, force: Bool) async throws {
+    func reinstall(packageName: String, force: Bool, disablesTapTrustChecks: Bool) async throws {
         let arguments = force ? ["reinstall", "--force", packageName] : ["reinstall", packageName]
-        _ = try await brewJSON(arguments: arguments)
+        _ = try await brewJSON(
+            arguments: arguments,
+            allowsAdministratorAuthentication: true,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Runs `brew uninstall` for the selected package.
-    func delete(packageName: String) async throws {
-        _ = try await brewJSON(arguments: ["uninstall", packageName])
+    func delete(packageName: String, disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["uninstall", packageName],
+            allowsAdministratorAuthentication: true,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Runs a Homebrew command and returns stdout as raw data.
-    private func brewJSON(arguments: [String]) async throws -> Data {
-        try await runBrew(arguments: arguments)
+    private func brewJSON(
+        arguments: [String],
+        timeout: TimeInterval = 45,
+        progress: HomebrewProgressHandler? = nil,
+        allowsAdministratorAuthentication: Bool = false,
+        disablesTapTrustChecks: Bool
+    ) async throws -> Data {
+        try await runBrew(
+            arguments: arguments,
+            timeout: timeout,
+            progress: progress,
+            allowsAdministratorAuthentication: allowsAdministratorAuthentication,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Wraps a Homebrew command in a login zsh invocation.
@@ -194,10 +285,25 @@ struct HomebrewCLIService: HomebrewServicing {
     /// Homebrew is commonly initialized from `.zprofile` through
     /// `eval "$(/opt/homebrew/bin/brew shellenv)"`. Launching a login shell allows
     /// that setup to run without loading interactive `.zshrc` prompt plugins.
-    private func runBrew(arguments: [String]) async throws -> Data {
+    private func runBrew(
+        arguments: [String],
+        timeout: TimeInterval,
+        progress: HomebrewProgressHandler?,
+        allowsAdministratorAuthentication: Bool,
+        disablesTapTrustChecks: Bool
+    ) async throws -> Data {
         let shellURL = URL(fileURLWithPath: "/bin/zsh")
         let command = "exec brew \(arguments.map(\.quotedForShell).joined(separator: " "))"
-        return try await runExecutable(shellURL, arguments: ["-lc", command], reportedExecutablePath: "brew", reportedArguments: arguments)
+        return try await runExecutable(
+            shellURL,
+            arguments: ["-lc", command],
+            reportedExecutablePath: "brew",
+            reportedArguments: arguments,
+            timeout: timeout,
+            progress: progress,
+            allowsAdministratorAuthentication: allowsAdministratorAuthentication,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Launches an executable and streams stdout/stderr until it exits.
@@ -219,20 +325,34 @@ struct HomebrewCLIService: HomebrewServicing {
         arguments: [String],
         reportedExecutablePath: String? = nil,
         reportedArguments: [String]? = nil,
-        timeout: TimeInterval = 45
+        timeout: TimeInterval = 45,
+        progress: HomebrewProgressHandler? = nil,
+        allowsAdministratorAuthentication: Bool = false,
+        disablesTapTrustChecks: Bool
     ) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
+        let authenticationHelper: HomebrewAskpassHelper?
+        if allowsAdministratorAuthentication {
+            do {
+                authenticationHelper = try HomebrewAskpassHelper.create()
+            } catch {
+                throw HomebrewServiceError.authenticationHelperFailed(message: error.localizedDescription)
+            }
+        } else {
+            authenticationHelper = nil
+        }
+        defer { authenticationHelper?.remove() }
+
+        return try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = executableURL
             process.arguments = arguments
 
-            var environment = ProcessInfo.processInfo.environment
-            environment["PATH"] = resolvedPATH
-            environment["HOMEBREW_NO_ANALYTICS"] = "1"
-            environment["HOMEBREW_NO_AUTO_UPDATE"] = "1"
-            environment["HOMEBREW_NO_INSTALL_CLEANUP"] = "1"
-            environment["HOMEBREW_NO_ENV_HINTS"] = "1"
-            process.environment = environment
+            process.environment = HomebrewCommandEnvironment.make(
+                inheriting: ProcessInfo.processInfo.environment,
+                resolvedPATH: resolvedPATH,
+                disablesTapTrustChecks: disablesTapTrustChecks,
+                askpassPath: authenticationHelper?.executableURL.path
+            )
 
             let displayPath = reportedExecutablePath ?? executableURL.path
             let displayArguments = reportedArguments ?? arguments
@@ -241,12 +361,18 @@ struct HomebrewCLIService: HomebrewServicing {
             let outputBuffer = ProcessOutputBuffer()
             let errorBuffer = ProcessOutputBuffer()
             let completion = ProcessCompletion(continuation)
+            let outputObserver = progress.map { HomebrewProcessOutputObserver(progress: $0) }
+            let errorObserver = progress.map { HomebrewProcessOutputObserver(progress: $0) }
 
             output.fileHandleForReading.readabilityHandler = { handle in
-                outputBuffer.append(handle.availableData)
+                let data = handle.availableData
+                outputBuffer.append(data)
+                outputObserver?.consume(data)
             }
             error.fileHandleForReading.readabilityHandler = { handle in
-                errorBuffer.append(handle.availableData)
+                let data = handle.availableData
+                errorBuffer.append(data)
+                errorObserver?.consume(data)
             }
 
             process.standardOutput = output
@@ -254,8 +380,14 @@ struct HomebrewCLIService: HomebrewServicing {
             process.terminationHandler = { process in
                 output.fileHandleForReading.readabilityHandler = nil
                 error.fileHandleForReading.readabilityHandler = nil
-                outputBuffer.append(output.fileHandleForReading.readDataToEndOfFile())
-                errorBuffer.append(error.fileHandleForReading.readDataToEndOfFile())
+                let remainingOutput = output.fileHandleForReading.readDataToEndOfFile()
+                let remainingError = error.fileHandleForReading.readDataToEndOfFile()
+                outputBuffer.append(remainingOutput)
+                errorBuffer.append(remainingError)
+                outputObserver?.consume(remainingOutput)
+                errorObserver?.consume(remainingError)
+                outputObserver?.finish()
+                errorObserver?.finish()
 
                 if process.terminationStatus == 0 {
                     completion.finish(.success(outputBuffer.data))

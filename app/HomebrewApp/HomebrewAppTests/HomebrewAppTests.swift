@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import HomebrewApp
 
@@ -63,10 +64,206 @@ struct HomebrewAppTests {
         library.prepareExport()
 
         let data = try #require(library.exportData)
-        let payload = try JSONDecoder().decode(PackageExportDocumentPayload.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let payload = try decoder.decode(PackageExportDocumentPayload.self, from: data)
 
         #expect(payload.packageManager == "homebrew")
         #expect(payload.packages.map(\.name) == ["git"])
         #expect(payload.packages.first?.installedVersions.first?.version == "2.50.1")
     }
+
+    @Test @MainActor func upgradeAllRunsCleanupWhenEnabled() async throws {
+        let service = RecordingHomebrewService()
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+
+        await library.upgradeAll(cleanupAfterUpgrade: true, from: context)
+
+        #expect(service.recordedOperations == [.updateHomebrew, .upgradeAll, .cleanup, .installedPackages])
+        #expect(library.errorMessage == nil)
+    }
+
+    @Test @MainActor func upgradeAllSkipsCleanupWhenDisabled() async throws {
+        let service = RecordingHomebrewService()
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+
+        await library.upgradeAll(cleanupAfterUpgrade: false, from: context)
+
+        #expect(service.recordedOperations == [.updateHomebrew, .upgradeAll, .installedPackages])
+        #expect(library.logs.contains { $0.title == "Cleanup skipped" })
+    }
+
+    @Test @MainActor func upgradeAllDoesNotCleanupOrRefreshAfterUpgradeFailure() async throws {
+        let service = RecordingHomebrewService(upgradeError: TestServiceError.upgradeFailed)
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+
+        await library.upgradeAll(cleanupAfterUpgrade: true, from: context)
+
+        #expect(service.recordedOperations == [.updateHomebrew, .upgradeAll])
+        #expect(library.errorMessage == TestServiceError.upgradeFailed.localizedDescription)
+        #expect(library.isLoading == false)
+    }
+
+    @Test @MainActor func upgradeAllStopsWhenHomebrewUpdateFails() async throws {
+        let service = RecordingHomebrewService(updateError: TestServiceError.updateFailed)
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+
+        await library.upgradeAll(cleanupAfterUpgrade: true, from: context)
+
+        #expect(service.recordedOperations == [.updateHomebrew])
+        #expect(library.errorMessage == TestServiceError.updateFailed.localizedDescription)
+        #expect(library.logs.contains { $0.title == "Homebrew update failed" })
+        #expect(library.isLoading == false)
+    }
+
+    @Test @MainActor func upgradeAllPassesDisabledTrustChecksPreference() async throws {
+        let service = RecordingHomebrewService()
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+        library.disablesTapTrustChecks = true
+
+        await library.upgradeAll(cleanupAfterUpgrade: true, from: context)
+
+        #expect(service.recordedTrustCheckSettings == [true, true, true, true])
+    }
+
+    @Test func commandEnvironmentAppliesTapTrustPreference() {
+        let inherited = [
+            "HOMEBREW_NO_REQUIRE_TAP_TRUST": "1",
+            "PRESERVED_VALUE": "present"
+        ]
+
+        let enabled = HomebrewCommandEnvironment.make(
+            inheriting: inherited,
+            resolvedPATH: "/test/bin",
+            disablesTapTrustChecks: true,
+            askpassPath: "/test/askpass"
+        )
+        let disabled = HomebrewCommandEnvironment.make(
+            inheriting: inherited,
+            resolvedPATH: "/test/bin",
+            disablesTapTrustChecks: false,
+            askpassPath: nil
+        )
+
+        #expect(enabled["HOMEBREW_NO_REQUIRE_TAP_TRUST"] == "1")
+        #expect(enabled["SUDO_ASKPASS"] == "/test/askpass")
+        #expect(enabled["PRESERVED_VALUE"] == "present")
+        #expect(disabled["HOMEBREW_NO_REQUIRE_TAP_TRUST"] == nil)
+    }
+
+    @Test func parsesHomebrewUpgradeProgress() {
+        #expect(HomebrewOutputParser.progressMessage(from: "==> Upgrading git") == "Upgrading git")
+        #expect(
+            HomebrewOutputParser.progressMessage(
+                from: "\u{001B}[34m==> Installing dependencies for ripgrep: pcre2\u{001B}[0m"
+            ) == "Installing dependencies for ripgrep: pcre2"
+        )
+        #expect(
+            HomebrewOutputParser.progressMessage(
+                from: "==> Running installer for docker with sudo; the password may be necessary."
+            ) == "Waiting for administrator password for docker"
+        )
+        #expect(HomebrewOutputParser.progressMessage(from: "Already up-to-date.") == nil)
+    }
+
+    @Test func createsPrivateAskpassHelper() throws {
+        let helper = try HomebrewAskpassHelper.create()
+        defer { helper.remove() }
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: helper.executableURL.path)
+        let permissions = try #require(attributes[.posixPermissions] as? NSNumber)
+        let script = try String(contentsOf: helper.executableURL, encoding: .utf8)
+
+        #expect(permissions.intValue == 0o700)
+        #expect(script.contains("with hidden answer"))
+        #expect(script.contains("/usr/bin/osascript"))
+    }
+
+    @MainActor
+    private func makeModelContext() throws -> ModelContext {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: BrewPackage.self,
+            BrewVersion.self,
+            configurations: configuration
+        )
+        return ModelContext(container)
+    }
+}
+
+private enum RecordedHomebrewOperation: Equatable, Sendable {
+    case updateHomebrew
+    case upgradeAll
+    case cleanup
+    case installedPackages
+}
+
+private enum TestServiceError: LocalizedError {
+    case updateFailed
+    case upgradeFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .updateFailed:
+            "The Homebrew update failed."
+        case .upgradeFailed:
+            "The bulk upgrade failed."
+        }
+    }
+}
+
+@MainActor
+private final class RecordingHomebrewService: HomebrewServicing {
+    private(set) var recordedOperations: [RecordedHomebrewOperation] = []
+    private(set) var recordedTrustCheckSettings: [Bool] = []
+    private let updateError: (any Error)?
+    private let upgradeError: (any Error)?
+
+    init(updateError: (any Error)? = nil, upgradeError: (any Error)? = nil) {
+        self.updateError = updateError
+        self.upgradeError = upgradeError
+    }
+
+    func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO] {
+        recordedOperations.append(.installedPackages)
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+        return []
+    }
+
+    func updateHomebrew(disablesTapTrustChecks: Bool) async throws {
+        recordedOperations.append(.updateHomebrew)
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+        if let updateError {
+            throw updateError
+        }
+    }
+
+    func upgradeAll(disablesTapTrustChecks: Bool, progress: HomebrewProgressHandler?) async throws {
+        recordedOperations.append(.upgradeAll)
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+        if let upgradeError {
+            throw upgradeError
+        }
+        progress?("Upgrading test-package")
+    }
+
+    func cleanup(disablesTapTrustChecks: Bool) async throws {
+        recordedOperations.append(.cleanup)
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+    }
+
+    func deleteVersion(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws {}
+
+    func makeVersionActive(packageName: String, version: String, disablesTapTrustChecks: Bool) async throws {}
+
+    func update(packageName: String, version: String?, disablesTapTrustChecks: Bool) async throws {}
+
+    func reinstall(packageName: String, force: Bool, disablesTapTrustChecks: Bool) async throws {}
+
+    func delete(packageName: String, disablesTapTrustChecks: Bool) async throws {}
 }

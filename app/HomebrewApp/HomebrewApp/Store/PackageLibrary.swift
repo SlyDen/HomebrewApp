@@ -36,6 +36,12 @@ final class PackageLibrary {
     /// Whether a refresh or package action is currently in progress.
     var isLoading = false
 
+    /// Whether child Homebrew commands bypass non-official tap trust checks.
+    var disablesTapTrustChecks = false
+
+    /// Concise live status parsed from the currently running Homebrew command.
+    var currentCommandProgress: String?
+
     /// Whether the bottom execution log panel is visible.
     var isLogPanelPresented = false
 
@@ -47,6 +53,9 @@ final class PackageLibrary {
 
     /// Pre-encoded JSON data used by `PackageExportDocument`.
     var exportData: Data?
+
+    /// Identifies the command whose streamed callbacks may update live progress.
+    @ObservationIgnored private var activeProgressSessionID: UUID?
 
     /// Creates a package library backed by the supplied service.
     ///
@@ -103,7 +112,7 @@ final class PackageLibrary {
         appendLog(.command, "Executing command", detail: "brew info --json=v2 --installed")
 
         do {
-            let livePackages = try await service.installedPackages()
+            let livePackages = try await service.installedPackages(disablesTapTrustChecks: disablesTapTrustChecks)
             appendLog(.success, "Fetched package list", detail: "Homebrew returned \(livePackages.count) installed packages.")
             try upsert(livePackages, in: context)
             packages = livePackages.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -116,6 +125,84 @@ final class PackageLibrary {
 
         isLoading = false
         appendLog(.state, "Idle", detail: "No package operation is currently running.")
+    }
+
+    /// Upgrades every outdated Homebrew package, optionally performs a full
+    /// cleanup, and refreshes the package cache afterward.
+    ///
+    /// Cleanup runs only after a successful upgrade. A cleanup failure is surfaced
+    /// to the user but does not prevent the package list from reflecting upgrades
+    /// that already completed.
+    ///
+    /// - Parameters:
+    ///   - cleanupAfterUpgrade: Whether to run `brew cleanup` after upgrading.
+    ///   - context: SwiftData model context used by the follow-up refresh.
+    func upgradeAll(cleanupAfterUpgrade: Bool, from context: ModelContext) async {
+        isLoading = true
+        errorMessage = nil
+        currentCommandProgress = "Updating Homebrew metadata"
+        appendLog(.state, "Updating Homebrew", detail: "Fetching the latest Homebrew and formula metadata before upgrading.")
+        appendLog(.command, "Executing command", detail: "brew update")
+
+        do {
+            try await service.updateHomebrew(disablesTapTrustChecks: disablesTapTrustChecks)
+            appendLog(.success, "Homebrew update completed", detail: "Homebrew and formula metadata are up to date.")
+        } catch {
+            currentCommandProgress = nil
+            errorMessage = error.localizedDescription
+            appendLog(.error, "Homebrew update failed", detail: error.localizedDescription)
+            isLoading = false
+            appendLog(.state, "Idle", detail: "Upgrade all was stopped before package changes began.")
+            return
+        }
+
+        currentCommandProgress = "Preparing Homebrew upgrade"
+        appendLog(.state, "Starting upgrade all", detail: "Upgrading all outdated, unpinned Homebrew packages.")
+        appendLog(.command, "Executing command", detail: "brew upgrade --no-ask")
+
+        let progressSessionID = UUID()
+        activeProgressSessionID = progressSessionID
+
+        do {
+            try await service.upgradeAll(disablesTapTrustChecks: disablesTapTrustChecks) { [weak self] message in
+                guard let self, activeProgressSessionID == progressSessionID else { return }
+                currentCommandProgress = message
+            }
+            activeProgressSessionID = nil
+            appendLog(.success, "Upgrade all completed", detail: "All available package upgrades finished.")
+        } catch {
+            activeProgressSessionID = nil
+            currentCommandProgress = nil
+            errorMessage = error.localizedDescription
+            appendLog(.error, "Upgrade all failed", detail: error.localizedDescription)
+            isLoading = false
+            appendLog(.state, "Idle", detail: "No package operation is currently running.")
+            return
+        }
+
+        var cleanupErrorMessage: String?
+        if cleanupAfterUpgrade {
+            currentCommandProgress = "Cleaning up Homebrew"
+            appendLog(.state, "Starting cleanup", detail: "Removing outdated versions and stale cache files.")
+            appendLog(.command, "Executing command", detail: "brew cleanup")
+
+            do {
+                try await service.cleanup(disablesTapTrustChecks: disablesTapTrustChecks)
+                appendLog(.success, "Cleanup completed", detail: "Homebrew cleanup finished.")
+            } catch {
+                cleanupErrorMessage = error.localizedDescription
+                appendLog(.error, "Cleanup failed", detail: error.localizedDescription)
+            }
+        } else {
+            appendLog(.info, "Cleanup skipped", detail: "The cleanup-after-upgrade preference is disabled.")
+        }
+
+        currentCommandProgress = "Refreshing installed packages"
+        await refresh(from: context)
+        currentCommandProgress = nil
+        if errorMessage == nil, let cleanupErrorMessage {
+            errorMessage = cleanupErrorMessage
+        }
     }
 
     /// Performs a package-level action through the service and refreshes state.
@@ -133,13 +220,28 @@ final class PackageLibrary {
         do {
             switch action {
             case .upgrade:
-                try await service.update(packageName: package.name, version: nil)
+                try await service.update(
+                    packageName: package.name,
+                    version: nil,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
             case .reinstall:
-                try await service.reinstall(packageName: package.name, force: false)
+                try await service.reinstall(
+                    packageName: package.name,
+                    force: false,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
             case .forceReinstall:
-                try await service.reinstall(packageName: package.name, force: true)
+                try await service.reinstall(
+                    packageName: package.name,
+                    force: true,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
             case .delete:
-                try await service.delete(packageName: package.name)
+                try await service.delete(
+                    packageName: package.name,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
             }
             appendLog(.success, "\(action.title) completed", detail: "Refreshing package list after \(package.name).")
             await refresh(from: context)
@@ -167,11 +269,23 @@ final class PackageLibrary {
         do {
             switch action {
             case .delete:
-                try await service.deleteVersion(packageName: package.name, version: version.version)
+                try await service.deleteVersion(
+                    packageName: package.name,
+                    version: version.version,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
             case .makeActive:
-                try await service.makeVersionActive(packageName: package.name, version: version.version)
+                try await service.makeVersionActive(
+                    packageName: package.name,
+                    version: version.version,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
             case .update:
-                try await service.update(packageName: package.name, version: version.version)
+                try await service.update(
+                    packageName: package.name,
+                    version: version.version,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
             }
             appendLog(.success, "\(action.title) completed", detail: "Refreshing package list after \(package.name) \(version.version).")
             await refresh(from: context)

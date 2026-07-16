@@ -15,15 +15,19 @@ Package-level actions include:
 - Force Reinstall
 - Delete
 
+The Packages menu and package-list toolbar also provide **Upgrade All Packages**. The workflow always runs `brew update` first so Homebrew and formula metadata are current. Only after that mandatory step succeeds does the app run `brew upgrade --no-ask` with no package arguments, upgrading every outdated, unpinned formula and cask. When the cleanup preference is enabled, the app follows a successful upgrade with `brew cleanup` before refreshing the package list.
+
 Version-level actions include:
 
 - Make Active
 - Upgrade Package
 - Delete Version
 
-Every command appends structured log entries before and after execution. The console dock remains visible at the bottom of the window, and the expanded log panel shows timestamps, severity, command details, warnings, and failures.
+Every command appends structured log entries before and after execution. During a bulk upgrade, the console dock streams meaningful Homebrew milestones such as the package currently being upgraded. The dock and new log-state badges animate as their state changes while respecting Reduce Motion. The expanded log panel shows timestamps, severity, command details, warnings, and failures.
 
-![Expanded log panel with state, success, and warning entries.](package-logs.png)
+Some cask installers and uninstallers require administrator access. For package upgrades, reinstalls, and removals, the app supplies Homebrew with a temporary, user-only `SUDO_ASKPASS` helper that presents a native hidden-password dialog. The password passes directly to `sudo`; it is not retained in app state or written to logs, and the helper is removed when the command exits.
+
+![Expanded log panel showing the refreshed package workflow, color-coded state badges, and console summary.](package-logs.png)
 
 ## Command Mapping
 

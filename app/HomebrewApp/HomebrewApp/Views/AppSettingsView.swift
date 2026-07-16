@@ -4,12 +4,16 @@ import SwiftUI
 enum AppPreferenceKeys {
     static let appearancePreference = "appearancePreference"
     static let isHomebrewProviderEnabled = "isHomebrewProviderEnabled"
+    static let cleanupAfterUpgrade = "cleanupAfterUpgrade"
+    static let disablesTapTrustChecks = "disablesTapTrustChecks"
 }
 
 /// Xcode-style app settings window with toolbar tabs for preference groups.
 struct AppSettingsView: View {
     @AppStorage(AppPreferenceKeys.appearancePreference) private var appearancePreferenceRawValue = AppearancePreference.system.rawValue
     @AppStorage(AppPreferenceKeys.isHomebrewProviderEnabled) private var isHomebrewProviderEnabled = true
+    @AppStorage(AppPreferenceKeys.cleanupAfterUpgrade) private var cleanupAfterUpgrade = true
+    @AppStorage(AppPreferenceKeys.disablesTapTrustChecks) private var disablesTapTrustChecks = false
 
     /// Settings window body grouped into native macOS preference tabs.
     var body: some View {
@@ -19,7 +23,11 @@ struct AppSettingsView: View {
             }
 
             Tab("Providers", systemImage: "shippingbox") {
-                ProvidersSettingsPane(isHomebrewProviderEnabled: $isHomebrewProviderEnabled)
+                ProvidersSettingsPane(
+                    isHomebrewProviderEnabled: $isHomebrewProviderEnabled,
+                    cleanupAfterUpgrade: $cleanupAfterUpgrade,
+                    disablesTapTrustChecks: $disablesTapTrustChecks
+                )
             }
         }
         .scenePadding()
@@ -184,6 +192,8 @@ private struct ThemePreview: View {
 /// Package provider preferences.
 private struct ProvidersSettingsPane: View {
     @Binding var isHomebrewProviderEnabled: Bool
+    @Binding var cleanupAfterUpgrade: Bool
+    @Binding var disablesTapTrustChecks: Bool
 
     var body: some View {
         Form {
@@ -197,6 +207,39 @@ private struct ProvidersSettingsPane: View {
                     }
                 }
                 .toggleStyle(.switch)
+
+                Toggle(isOn: $cleanupAfterUpgrade) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Clean up after upgrading all packages")
+                        Text("Run brew cleanup after a successful bulk upgrade.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .disabled(isHomebrewProviderEnabled == false)
+            }
+
+            Section("Security") {
+                Toggle(isOn: $disablesTapTrustChecks) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Disable tap trust checks")
+                        Text("Set HOMEBREW_NO_REQUIRE_TAP_TRUST=1 for commands launched by this app. Homebrew does not recommend this override and plans to remove it.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                .disabled(isHomebrewProviderEnabled == false)
+
+                if disablesTapTrustChecks {
+                    Label(
+                        "Formulae, casks, and commands from untrusted taps may execute with your user privileges.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                }
             }
         }
         .formStyle(.grouped)

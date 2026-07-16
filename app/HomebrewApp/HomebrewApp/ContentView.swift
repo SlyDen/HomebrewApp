@@ -8,13 +8,17 @@ import SwiftUI
 struct ContentView: View {
     @AppStorage(AppPreferenceKeys.appearancePreference) private var appearancePreferenceRawValue = AppearancePreference.system.rawValue
     @AppStorage(AppPreferenceKeys.isHomebrewProviderEnabled) private var isHomebrewProviderEnabled = true
+    @AppStorage(AppPreferenceKeys.cleanupAfterUpgrade) private var cleanupAfterUpgrade = true
+    @AppStorage(AppPreferenceKeys.disablesTapTrustChecks) private var disablesTapTrustChecks = false
     @State private var library = PackageLibrary()
 
     /// Main view body containing the Homebrew package browser.
     var body: some View {
         PackageListView(
             library: library,
-            isHomebrewProviderEnabled: $isHomebrewProviderEnabled
+            isHomebrewProviderEnabled: $isHomebrewProviderEnabled,
+            cleanupAfterUpgrade: cleanupAfterUpgrade,
+            disablesTapTrustChecks: disablesTapTrustChecks
         )
         .appAppearance(appearancePreference)
         .onAppear {

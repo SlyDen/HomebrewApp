@@ -6,9 +6,11 @@ Find installed Homebrew formulae and casks quickly.
 
 The package browser opens as a two-column SwiftUI split view. The sidebar lists installed packages, while the detail column keeps the selected package visible for inspection and actions.
 
-![Package browser with cached Homebrew packages, selected package details, and console status.](package-browser.png)
+![Package browser with Upgrade All, cached Homebrew packages, selected package details, and console status.](package-browser.png)
 
 `PackageListView` shows cached packages immediately when SwiftData has a previous refresh available. If the cache is empty and the Homebrew provider is enabled, `PackageLibrary` starts a live refresh with `brew info --json=v2 --installed`.
+
+The main window opens at a comfortable ideal size, supports a smaller tested minimum size, and remains freely resizable above that minimum. Long command-progress messages truncate in the console dock instead of increasing the window's minimum width.
 
 ![Filter menu showing all packages, formulae, casks, and the multiple-versions toggle.](package-filter.png)
 

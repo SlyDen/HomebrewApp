@@ -3,6 +3,7 @@ import SwiftUI
 /// Menu commands for package list actions in the active window.
 struct PackageCommands: Commands {
     @FocusedValue(\.refreshPackagesAction) private var refreshPackagesAction
+    @FocusedValue(\.upgradeAllPackagesAction) private var upgradeAllPackagesAction
 
     /// Command menu body.
     var body: some Commands {
@@ -12,6 +13,13 @@ struct PackageCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: .command)
             .disabled(refreshPackagesAction?.isDisabled ?? true)
+
+            Divider()
+
+            Button("Upgrade All Packages") {
+                upgradeAllPackagesAction?.perform()
+            }
+            .disabled(upgradeAllPackagesAction?.isDisabled ?? true)
         }
     }
 }
@@ -22,13 +30,13 @@ struct RefreshPackagesAction {
     let perform: () -> Void
 }
 
-private struct RefreshPackagesActionKey: FocusedValueKey {
-    typealias Value = RefreshPackagesAction
+/// Focused action exposed by the package browser for bulk upgrades.
+struct UpgradeAllPackagesAction {
+    let isDisabled: Bool
+    let perform: () -> Void
 }
 
 extension FocusedValues {
-    var refreshPackagesAction: RefreshPackagesAction? {
-        get { self[RefreshPackagesActionKey.self] }
-        set { self[RefreshPackagesActionKey.self] = newValue }
-    }
+    @Entry var refreshPackagesAction: RefreshPackagesAction?
+    @Entry var upgradeAllPackagesAction: UpgradeAllPackagesAction?
 }

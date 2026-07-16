@@ -12,6 +12,8 @@ struct PackageListView: View {
     @Environment(\.appAppearancePreference) private var appearancePreference
     @Bindable var library: PackageLibrary
     @Binding var isHomebrewProviderEnabled: Bool
+    let cleanupAfterUpgrade: Bool
+    let disablesTapTrustChecks: Bool
     @State private var isExporting = false
     @State private var exportDocument = PackageExportDocument()
 
@@ -20,6 +22,11 @@ struct PackageListView: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 HStack {
+                    Button("Upgrade All", systemImage: "arrow.up.circle") {
+                        upgradeAllPackages()
+                    }
+                    .disabled(library.isLoading || !isHomebrewProviderEnabled)
+
                     Button {
                         refreshPackages()
                     } label: {
@@ -44,7 +51,7 @@ struct PackageListView: View {
             }
             .background(appearancePreference.palette.sidebar)
             .navigationTitle("Homebrew")
-            .navigationSplitViewColumnWidth(min: 300, ideal: 420, max: 520)
+            .navigationSplitViewColumnWidth(min: 360, ideal: 460, max: 560)
             .searchable(text: $library.searchText, prompt: "Search packages")
             .overlay {
                 if !isHomebrewProviderEnabled {
@@ -125,7 +132,15 @@ struct PackageListView: View {
                 refreshPackages()
             }
         )
+        .focusedSceneValue(
+            \.upgradeAllPackagesAction,
+            UpgradeAllPackagesAction(isDisabled: library.isLoading || !isHomebrewProviderEnabled) {
+                upgradeAllPackages()
+            }
+        )
         .task {
+            library.disablesTapTrustChecks = disablesTapTrustChecks
+
             do {
                 try library.loadCachedPackages(from: modelContext)
             } catch {
@@ -150,6 +165,9 @@ struct PackageListView: View {
             if isEnabled {
                 library.repairSelection()
             }
+        }
+        .onChange(of: disablesTapTrustChecks) { _, isDisabled in
+            library.disablesTapTrustChecks = isDisabled
         }
         .fileExporter(
             isPresented: $isExporting,
@@ -178,6 +196,17 @@ struct PackageListView: View {
     private func refreshPackages() {
         guard isHomebrewProviderEnabled else { return }
         Task { await library.refresh(from: modelContext) }
+    }
+
+    /// Starts a bulk upgrade using the active cleanup preference.
+    private func upgradeAllPackages() {
+        guard isHomebrewProviderEnabled else { return }
+        Task {
+            await library.upgradeAll(
+                cleanupAfterUpgrade: cleanupAfterUpgrade,
+                from: modelContext
+            )
+        }
     }
 }
 
@@ -249,6 +278,9 @@ private struct PackageLogPanel: View {
     /// Shared package library that owns log state.
     @Bindable var library: PackageLibrary
 
+    /// System preference used to disable log entrance and scrolling motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Panel body with a header and auto-scrolling log output.
     var body: some View {
         VStack(spacing: 0) {
@@ -294,16 +326,18 @@ private struct PackageLogPanel: View {
                             ForEach(library.logs) { entry in
                                 PackageLogRow(entry: entry)
                                     .id(entry.id)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
                     }
                     .padding(12)
+                    .animation(reduceMotion ? nil : .snappy, value: library.logs.count)
                 }
                 .frame(minHeight: 160, idealHeight: 220, maxHeight: 280)
                 .background(Color.black.opacity(0.88))
                 .onChange(of: library.logs.count) { _, _ in
                     if let lastID = library.logs.last?.id {
-                        withAnimation(.easeOut(duration: 0.2)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                             proxy.scrollTo(lastID, anchor: .bottom)
                         }
                     }
@@ -352,27 +386,14 @@ private struct ConsoleDockBar: View {
             Label("Console", systemImage: "terminal")
                 .font(.headline)
 
-            CapsuleStatus(level: statusLevel, text: statusText)
+            CapsuleStatus(level: statusLevel, text: statusText, isActive: library.isLoading)
 
-            if let latestEntry {
-                Text(latestEntry.title)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                if let detail = latestEntry.detail {
-                    Text(detail)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(latestEntry.level.foregroundColor)
-                        .lineLimit(1)
-                }
-            } else {
-                Text("No package activity yet")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 0)
+            ConsoleActivitySummary(
+                title: activityTitle,
+                detail: activityDetail,
+                detailColor: activityDetailColor
+            )
+            .layoutPriority(-1)
 
             LevelCounter(level: .warning, count: warningCount)
             LevelCounter(level: .error, count: errorCount)
@@ -401,6 +422,9 @@ private struct ConsoleDockBar: View {
 
     /// Current package operation status shown in the dock.
     private var statusText: String {
+        if library.currentCommandProgress?.hasPrefix("Waiting for administrator password") == true {
+            return "Password Required"
+        }
         if library.isLoading { return "Running" }
         if library.errorMessage != nil { return "Failed" }
         return "Idle"
@@ -408,9 +432,36 @@ private struct ConsoleDockBar: View {
 
     /// Color level for the current status.
     private var statusLevel: PackageLogLevel {
+        if library.currentCommandProgress?.hasPrefix("Waiting for administrator password") == true {
+            return .warning
+        }
         if library.isLoading { return .command }
         if library.errorMessage != nil { return .error }
         return .success
+    }
+
+    /// Short label describing the active command or most recent log entry.
+    private var activityTitle: String {
+        if library.isLoading, library.currentCommandProgress != nil {
+            return "Current operation"
+        }
+        return latestEntry?.title ?? "No package activity yet"
+    }
+
+    /// Detail allowed to truncate without contributing to the window's minimum width.
+    private var activityDetail: String? {
+        if library.isLoading, let currentCommandProgress = library.currentCommandProgress {
+            return currentCommandProgress
+        }
+        return latestEntry?.detail
+    }
+
+    /// Color associated with the active command or most recent log entry.
+    private var activityDetailColor: Color {
+        if library.isLoading {
+            return statusLevel.foregroundColor
+        }
+        return latestEntry?.level.foregroundColor ?? .secondary
     }
 }
 
@@ -422,14 +473,32 @@ private struct CapsuleStatus: View {
     /// Status text.
     let text: String
 
+    /// Whether to show indeterminate activity beside the status text.
+    let isActive: Bool
+
+    /// System preference used to avoid custom transition motion.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Capsule body.
     var body: some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(level.foregroundColor)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .background(level.backgroundColor, in: Capsule())
+        HStack(spacing: 5) {
+            if isActive {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(level.foregroundColor)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            Text(text)
+                .contentTransition(.opacity)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(level.foregroundColor)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(level.backgroundColor, in: Capsule())
+        .animation(reduceMotion ? nil : .snappy, value: isActive)
+        .animation(reduceMotion ? nil : .snappy, value: text)
     }
 }
 
@@ -469,13 +538,7 @@ private struct PackageLogRow: View {
                 .foregroundStyle(.white.opacity(0.58))
                 .frame(width: 82, alignment: .leading)
 
-            Label(entry.level.title, systemImage: entry.level.systemImage)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(entry.level.foregroundColor)
-                .labelStyle(.titleAndIcon)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(entry.level.backgroundColor, in: Capsule())
+            AnimatedLogLevelBadge(level: entry.level)
                 .frame(width: 104, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -491,13 +554,46 @@ private struct PackageLogRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-
-            Spacer(minLength: 0)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(entry.level.rowBackgroundColor, in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Log-level capsule that gently appears as a new row enters the panel.
+private struct AnimatedLogLevelBadge: View {
+    /// Level controlling the icon, label, and color.
+    let level: PackageLogLevel
+
+    /// Whether the badge has completed its entrance transition.
+    @State private var isPresented = false
+
+    /// System preference used to disable the custom entrance animation.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Animated badge body.
+    var body: some View {
+        Label(level.title, systemImage: level.systemImage)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(level.foregroundColor)
+            .labelStyle(.titleAndIcon)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(level.backgroundColor, in: Capsule())
+            .scaleEffect(isPresented ? 1 : 0.86)
+            .opacity(isPresented ? 1 : 0)
+            .onAppear {
+                if reduceMotion {
+                    isPresented = true
+                } else {
+                    withAnimation(.snappy) {
+                        isPresented = true
+                    }
+                }
+            }
     }
 }
 
@@ -571,7 +667,9 @@ private extension PackageLogLevel {
 #Preview {
     PackageListView(
         library: PackageLibrary(service: MockHomebrewService()),
-        isHomebrewProviderEnabled: .constant(true)
+        isHomebrewProviderEnabled: .constant(true),
+        cleanupAfterUpgrade: true,
+        disablesTapTrustChecks: false
     )
         .modelContainer(for: [BrewPackage.self, BrewVersion.self], inMemory: true)
 }

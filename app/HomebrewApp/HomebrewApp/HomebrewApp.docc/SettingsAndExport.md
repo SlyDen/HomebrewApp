@@ -8,9 +8,13 @@ HomebrewApp includes a macOS Settings scene with native tabbed panes. General se
 
 ![General settings with appearance choices and theme presets.](settings-general.png)
 
-![Provider settings with the Homebrew provider enabled.](settings-providers.png)
+![Provider and security settings with cleanup enabled and tap trust checks preserved.](settings-providers.png)
 
 Appearance choices are persisted with `@AppStorage` and applied to app windows through the shared appearance environment. The settings UI includes system light/dark choices and preset palettes previewed in the same split-view layout used by the main app.
+
+Provider settings also include **Clean up after upgrading all packages**, which is enabled by default. When enabled, a successful bulk upgrade is followed by a full `brew cleanup`; disabling it leaves outdated versions and cached downloads for Homebrew's normal cleanup policy.
+
+The **Disable tap trust checks** security option is off by default. Enabling it sets `HOMEBREW_NO_REQUIRE_TAP_TRUST=1` only for Homebrew commands launched by the app. This allows formulae, casks, and commands from untrusted taps to load, so prefer trusting only the specific third-party packages you need whenever possible.
 
 ## JSON Export
 
