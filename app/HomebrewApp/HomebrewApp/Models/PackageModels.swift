@@ -27,6 +27,9 @@ final class BrewPackage {
     /// Earliest known install date for the package.
     var installedOn: Date
 
+    /// Cached logical byte count for the Homebrew-managed package directory.
+    var installedSize: Int64?
+
     /// Timestamp when this record was last seen in a refresh.
     var lastSeenAt: Date
 
@@ -51,6 +54,7 @@ final class BrewPackage {
         packageSummary: String,
         homepage: URL?,
         installedOn: Date,
+        installedSize: Int64? = nil,
         lastSeenAt: Date = .now,
         versions: [BrewVersion] = []
     ) {
@@ -60,6 +64,7 @@ final class BrewPackage {
         self.packageSummary = packageSummary
         self.homepage = homepage
         self.installedOn = installedOn
+        self.installedSize = installedSize
         self.lastSeenAt = lastSeenAt
         self.versions = versions
     }
@@ -117,6 +122,7 @@ extension BrewPackage {
         packageSummary = package.summary
         homepage = package.homepage
         installedOn = package.installedOn
+        installedSize = package.installedSize
         lastSeenAt = seenAt
 
         versions.removeAll()
@@ -141,7 +147,8 @@ extension BrewPackage {
                     return lhs.version.localizedStandardCompare(rhs.version) == .orderedDescending
                 }
                 .map { InstalledVersionDTO(version: $0.version, isActive: $0.isActive, installedOn: $0.installedOn) },
-            installedOn: installedOn
+            installedOn: installedOn,
+            installedSize: installedSize
         )
     }
 }

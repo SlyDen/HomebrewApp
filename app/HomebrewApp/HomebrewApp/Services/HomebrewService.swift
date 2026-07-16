@@ -9,6 +9,13 @@ protocol HomebrewServicing: Sendable {
     /// Returns the packages currently installed by the backing package manager.
     func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO]
 
+    /// Installs a formula from the Homebrew registry.
+    ///
+    /// - Parameters:
+    ///   - packageName: Formula name published by Homebrew.
+    ///   - disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
+    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws
+
     /// Fetches the newest Homebrew and formula metadata before package upgrades.
     func updateHomebrew(disablesTapTrustChecks: Bool) async throws
 
@@ -138,6 +145,9 @@ struct MockHomebrewService: HomebrewServicing {
         ]
     }
 
+    /// No-op sample formula installation.
+    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {}
+
     /// No-op sample Homebrew metadata update.
     func updateHomebrew(disablesTapTrustChecks: Bool) async throws {}
 
@@ -187,7 +197,22 @@ struct HomebrewCLIService: HomebrewServicing {
         decoder.dateDecodingStrategy = .secondsSince1970
         let response = try decoder.decode(BrewInfoResponse.self, from: data)
 
-        return response.formulae.map { $0.package(kind: .formula) } + response.casks.map { $0.package(kind: .cask) }
+        let packages = response.formulae.map { $0.package(kind: .formula) }
+            + response.casks.map { $0.package(kind: .cask) }
+        let sizes = await installedPackageSizes(for: packages, disablesTapTrustChecks: disablesTapTrustChecks)
+        return packages.map { package in
+            package.withInstalledSize(sizes[package.id])
+        }
+    }
+
+    /// Runs `brew install --formula` for a formula selected from the registry.
+    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["install", "--formula", packageName],
+            timeout: 60 * 60,
+            allowsAdministratorAuthentication: true,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 
     /// Runs `brew update` as the mandatory first phase of a bulk upgrade.
@@ -261,6 +286,26 @@ struct HomebrewCLIService: HomebrewServicing {
             allowsAdministratorAuthentication: true,
             disablesTapTrustChecks: disablesTapTrustChecks
         )
+    }
+
+    /// Measures package directories without failing the main package refresh when
+    /// disk-usage metadata is unavailable.
+    private func installedPackageSizes(
+        for packages: [InstalledPackageDTO],
+        disablesTapTrustChecks: Bool
+    ) async -> [String: Int64] {
+        guard let data = try? await brewJSON(
+            arguments: ["--prefix"],
+            disablesTapTrustChecks: disablesTapTrustChecks
+        ),
+        let output = String(bytes: data, encoding: .utf8) else {
+            return [:]
+        }
+        let path = output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard path.isEmpty == false else { return [:] }
+        let prefix = URL(filePath: path, directoryHint: .isDirectory)
+        return await HomebrewPackageDiskUsage.sizes(for: packages, homebrewPrefix: prefix)
     }
 
     /// Runs a Homebrew command and returns stdout as raw data.
@@ -565,31 +610,6 @@ private struct BrewCask: Decodable {
             installedVersions: [InstalledVersionDTO(version: installed ?? "installed", isActive: true, installedOn: date)],
             installedOn: date
         )
-    }
-}
-
-/// Decodable subset of an installed Homebrew formula version.
-private struct BrewInstalledVersion: Decodable {
-    let version: String
-    let installedOnRequest: Bool?
-    let installedAsDependency: Bool?
-    let installedTime: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case version
-        case installedOnRequest = "installed_on_request"
-        case installedAsDependency = "installed_as_dependency"
-        case installedTime = "installed_time"
-    }
-
-    /// Install timestamp converted from Homebrew's seconds-since-epoch field.
-    var installedOn: Date? {
-        installedTime.map { Date(timeIntervalSince1970: TimeInterval($0)) }
-    }
-
-    /// Converts Homebrew version metadata into the UI/export DTO.
-    var versionDTO: InstalledVersionDTO {
-        InstalledVersionDTO(version: version, isActive: true, installedOn: installedOn)
     }
 }
 

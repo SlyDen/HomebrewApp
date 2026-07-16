@@ -30,6 +30,9 @@ final class PackageLibrary {
     /// Optional package-kind filter selected from the toolbar menu.
     var selectedKind: ManagedPackageKind?
 
+    /// Ordering applied to the installed package sidebar.
+    var sortOption: PackageSortOption = .name
+
     /// Whether the list should only show packages with more than one installed version.
     var showsOnlyMultipleVersions = false
 
@@ -68,7 +71,7 @@ final class PackageLibrary {
 
     /// Packages after applying the selected kind, version-count, and search filters.
     var filteredPackages: [InstalledPackageDTO] {
-        packages.filter { package in
+        let matchingPackages = packages.filter { package in
             let matchesKind = selectedKind == nil || package.kind == selectedKind
             let matchesVersionCount = !showsOnlyMultipleVersions || package.installedVersions.count > 1
             let matchesSearch = searchText.isEmpty
@@ -76,13 +79,56 @@ final class PackageLibrary {
                 || package.summary.localizedCaseInsensitiveContains(searchText)
             return matchesKind && matchesVersionCount && matchesSearch
         }
-        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return sortOption.sorted(matchingPackages)
     }
 
     /// The currently selected package, if it is still present in the latest data.
     var selectedPackage: InstalledPackageDTO? {
         guard let selectedPackageID else { return filteredPackages.first }
         return packages.first { $0.id == selectedPackageID }
+    }
+
+    /// Returns whether Homebrew currently reports the named formula as installed.
+    ///
+    /// - Parameter name: Exact formula name published by the registry.
+    func isFormulaInstalled(named name: String) -> Bool {
+        packages.contains { package in
+            package.kind == .formula && package.name == name
+        }
+    }
+
+    /// Installs a formula selected from the Homebrew registry and refreshes the
+    /// installed package snapshot afterward.
+    ///
+    /// - Parameters:
+    ///   - formulaName: Exact formula name published by the registry.
+    ///   - context: SwiftData model context used by the follow-up refresh.
+    func installFormula(named formulaName: String, context: ModelContext) async {
+        guard !isLoading, !isFormulaInstalled(named: formulaName) else { return }
+
+        isLoading = true
+        errorMessage = nil
+        currentCommandProgress = "Installing \(formulaName)"
+        appendLog(.state, "Installing formula", detail: "Formula: \(formulaName)")
+        appendLog(.command, "Executing command", detail: "brew install --formula \(formulaName)")
+
+        do {
+            try await service.installFormula(
+                packageName: formulaName,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+            appendLog(.success, "Formula installed", detail: "Refreshing installed packages after \(formulaName).")
+            currentCommandProgress = "Refreshing installed packages"
+            await refresh(from: context)
+        } catch is CancellationError {
+            appendLog(.info, "Formula installation cancelled", detail: "Formula: \(formulaName)")
+        } catch {
+            errorMessage = error.localizedDescription
+            appendLog(.error, "Formula installation failed", detail: error.localizedDescription)
+        }
+
+        currentCommandProgress = nil
+        isLoading = false
     }
 
     /// Loads package snapshots from SwiftData into memory.
@@ -369,6 +415,7 @@ final class PackageLibrary {
                     packageSummary: package.summary,
                     homepage: package.homepage,
                     installedOn: package.installedOn,
+                    installedSize: package.installedSize,
                     versions: package.installedVersions.map { BrewVersion(version: $0.version, isActive: $0.isActive, installedOn: $0.installedOn) }
                 )
                 context.insert(storedPackage)

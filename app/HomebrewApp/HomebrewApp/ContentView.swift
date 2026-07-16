@@ -6,20 +6,35 @@ import SwiftUI
 /// `ContentView` owns the observable `PackageLibrary` instance for the window and
 /// passes it into the package browser view hierarchy.
 struct ContentView: View {
-    @AppStorage(AppPreferenceKeys.appearancePreference) private var appearancePreferenceRawValue = AppearancePreference.system.rawValue
+    @AppStorage(AppPreferenceKeys.appearancePreference)
+    private var appearancePreferenceRawValue = AppearancePreference.system.rawValue
     @AppStorage(AppPreferenceKeys.isHomebrewProviderEnabled) private var isHomebrewProviderEnabled = true
     @AppStorage(AppPreferenceKeys.cleanupAfterUpgrade) private var cleanupAfterUpgrade = true
     @AppStorage(AppPreferenceKeys.disablesTapTrustChecks) private var disablesTapTrustChecks = false
     @State private var library = PackageLibrary()
+    @State private var formulaRegistry = FormulaRegistryStore()
 
     /// Main view body containing the Homebrew package browser.
     var body: some View {
-        PackageListView(
-            library: library,
-            isHomebrewProviderEnabled: $isHomebrewProviderEnabled,
-            cleanupAfterUpgrade: cleanupAfterUpgrade,
-            disablesTapTrustChecks: disablesTapTrustChecks
-        )
+        TabView {
+            Tab("Installed", systemImage: "shippingbox") {
+                PackageListView(
+                    library: library,
+                    isHomebrewProviderEnabled: $isHomebrewProviderEnabled,
+                    cleanupAfterUpgrade: cleanupAfterUpgrade,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
+            }
+
+            Tab("Formulae", systemImage: "magnifyingglass") {
+                FormulaRegistryView(
+                    store: formulaRegistry,
+                    library: library,
+                    isHomebrewProviderEnabled: isHomebrewProviderEnabled,
+                    disablesTapTrustChecks: disablesTapTrustChecks
+                )
+            }
+        }
         .appAppearance(appearancePreference)
         .onAppear {
             appearancePreference.apply()

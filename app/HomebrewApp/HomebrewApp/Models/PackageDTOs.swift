@@ -193,7 +193,7 @@ enum PackageVersionAction: String, CaseIterable, Identifiable, Sendable {
 /// to SwiftUI.
 struct InstalledPackageDTO: Codable, Hashable, Identifiable, Sendable {
     /// Stable Homebrew-specific identity for navigation, diffing, and persistence.
-    var id: String { "homebrew:\(kind.rawValue):\(name)" }
+    nonisolated var id: String { "homebrew:\(kind.rawValue):\(name)" }
 
     /// Package token or formula name, for example `git` or `visual-studio-code`.
     let name: String
@@ -212,6 +212,46 @@ struct InstalledPackageDTO: Codable, Hashable, Identifiable, Sendable {
 
     /// Earliest known install timestamp for the package.
     let installedOn: Date
+
+    /// Logical byte count inside the package's Homebrew-managed directory.
+    let installedSize: Int64?
+
+    /// Creates an immutable package snapshot.
+    init(
+        name: String,
+        kind: ManagedPackageKind,
+        summary: String,
+        homepage: URL?,
+        installedVersions: [InstalledVersionDTO],
+        installedOn: Date,
+        installedSize: Int64? = nil
+    ) {
+        self.name = name
+        self.kind = kind
+        self.summary = summary
+        self.homepage = homepage
+        self.installedVersions = installedVersions
+        self.installedOn = installedOn
+        self.installedSize = installedSize
+    }
+
+    /// Most recent known package install or upgrade timestamp.
+    var updatedOn: Date {
+        installedVersions.compactMap(\.installedOn).max() ?? installedOn
+    }
+
+    /// Returns this snapshot with an updated disk-usage measurement.
+    func withInstalledSize(_ size: Int64?) -> InstalledPackageDTO {
+        InstalledPackageDTO(
+            name: name,
+            kind: kind,
+            summary: summary,
+            homepage: homepage,
+            installedVersions: installedVersions,
+            installedOn: installedOn,
+            installedSize: size
+        )
+    }
 }
 
 /// A version entry attached to an installed package snapshot.
