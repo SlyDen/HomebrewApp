@@ -3,6 +3,8 @@ import SwiftUI
 /// Compact formula metadata shown in one registry result row.
 struct FormulaRegistryRow: View {
     let name: String
+    let fullName: String
+    let tap: String
     let summary: String?
     let stableVersion: String?
     let isDeprecated: Bool
@@ -38,6 +40,12 @@ struct FormulaRegistryRow: View {
                             .lineLimit(2)
                     }
 
+                    if tap != "homebrew/core" {
+                        Text(tap)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if let stableVersion {
                         Text("Version \(stableVersion)")
                             .font(.caption)
@@ -52,7 +60,7 @@ struct FormulaRegistryRow: View {
             Spacer(minLength: 0)
 
             FormulaInstallButton(
-                formulaName: name,
+                formulaName: fullName,
                 isFormulaDisabled: isDisabled,
                 isHomebrewProviderEnabled: isHomebrewProviderEnabled,
                 isInstalled: isInstalled,

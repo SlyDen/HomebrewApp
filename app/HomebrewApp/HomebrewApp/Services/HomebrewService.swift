@@ -9,10 +9,29 @@ protocol HomebrewServicing: Sendable {
     /// Returns the packages currently installed by the backing package manager.
     func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO]
 
+    /// Returns installed taps and the fully qualified formula names they publish.
+    ///
+    /// - Parameter disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
+    func installedTaps(disablesTapTrustChecks: Bool) async throws -> [HomebrewTap]
+
+    /// Adds a formula tap using its canonical `user/repository` name.
+    ///
+    /// - Parameters:
+    ///   - name: Canonical tap name accepted by Homebrew.
+    ///   - disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
+    func addTap(name: String, disablesTapTrustChecks: Bool) async throws
+
+    /// Removes an installed tap using its canonical `user/repository` name.
+    ///
+    /// - Parameters:
+    ///   - name: Canonical installed tap name.
+    ///   - disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
+    func removeTap(name: String, disablesTapTrustChecks: Bool) async throws
+
     /// Installs a formula from the Homebrew registry.
     ///
     /// - Parameters:
-    ///   - packageName: Formula name published by Homebrew.
+    ///   - packageName: Short or tap-qualified formula name published by Homebrew.
     ///   - disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
     func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws
 
@@ -144,6 +163,23 @@ struct MockHomebrewService: HomebrewServicing {
             )
         ]
     }
+
+    /// Returns deterministic sample tap data for previews and tests.
+    func installedTaps(disablesTapTrustChecks: Bool) async throws -> [HomebrewTap] {
+        [
+            HomebrewTap(
+                name: "darrylmorley/whatcable",
+                formulaNames: ["darrylmorley/whatcable/whatcable"],
+                remote: "https://github.com/darrylmorley/homebrew-whatcable"
+            )
+        ]
+    }
+
+    /// No-op sample tap addition.
+    func addTap(name: String, disablesTapTrustChecks: Bool) async throws {}
+
+    /// No-op sample tap removal.
+    func removeTap(name: String, disablesTapTrustChecks: Bool) async throws {}
 
     /// No-op sample formula installation.
     func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {}
@@ -499,6 +535,37 @@ struct HomebrewCLIService: HomebrewServicing {
         return (defaultPaths + currentPath.split(separator: ":").map(String.init))
             .removingDuplicates()
             .joined(separator: ":")
+    }
+}
+
+extension HomebrewCLIService {
+    /// Loads installed taps and their formula names from Homebrew's JSON output.
+    func installedTaps(disablesTapTrustChecks: Bool) async throws -> [HomebrewTap] {
+        let data = try await brewJSON(
+            arguments: ["tap-info", "--installed", "--json"],
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
+        return try JSONDecoder().decode([HomebrewTap].self, from: data)
+            .filter(\.isInstalled)
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Runs `brew tap` for a canonical tap name.
+    func addTap(name: String, disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["tap", name],
+            timeout: 10 * 60,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
+    }
+
+    /// Runs `brew untap` for a canonical tap name.
+    func removeTap(name: String, disablesTapTrustChecks: Bool) async throws {
+        _ = try await brewJSON(
+            arguments: ["untap", name],
+            timeout: 10 * 60,
+            disablesTapTrustChecks: disablesTapTrustChecks
+        )
     }
 }
 

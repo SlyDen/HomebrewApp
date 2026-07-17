@@ -22,7 +22,7 @@ struct FormulaRegistryDetailView: View {
 
             Section("Actions") {
                 FormulaInstallButton(
-                    formulaName: formula.name,
+                    formulaName: formula.fullName,
                     isFormulaDisabled: formula.isDisabled,
                     isHomebrewProviderEnabled: isHomebrewProviderEnabled,
                     isInstalled: library.isFormulaInstalled(named: formula.name),

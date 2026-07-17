@@ -235,8 +235,11 @@ struct HomebrewAppTests {
     }
 }
 
-private enum RecordedHomebrewOperation: Equatable, Sendable {
+enum RecordedHomebrewOperation: Equatable, Sendable {
     case installFormula(String)
+    case installedTaps
+    case addTap(String)
+    case removeTap(String)
     case updateHomebrew
     case upgradeAll
     case cleanup
@@ -261,30 +264,54 @@ private enum TestServiceError: LocalizedError {
 }
 
 @MainActor
-private final class RecordingHomebrewService: HomebrewServicing {
+final class RecordingHomebrewService: HomebrewServicing {
     private(set) var recordedOperations: [RecordedHomebrewOperation] = []
     private(set) var recordedTrustCheckSettings: [Bool] = []
     private let updateError: (any Error)?
     private let upgradeError: (any Error)?
     private let installError: (any Error)?
     private let installedPackagesResult: [InstalledPackageDTO]
+    private var installedTapsResult: [HomebrewTap]
 
     init(
         updateError: (any Error)? = nil,
         upgradeError: (any Error)? = nil,
         installError: (any Error)? = nil,
-        installedPackagesResult: [InstalledPackageDTO] = []
+        installedPackagesResult: [InstalledPackageDTO] = [],
+        installedTapsResult: [HomebrewTap] = []
     ) {
         self.updateError = updateError
         self.upgradeError = upgradeError
         self.installError = installError
         self.installedPackagesResult = installedPackagesResult
+        self.installedTapsResult = installedTapsResult
     }
 
     func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO] {
         recordedOperations.append(.installedPackages)
         recordedTrustCheckSettings.append(disablesTapTrustChecks)
         return installedPackagesResult
+    }
+
+    func installedTaps(disablesTapTrustChecks: Bool) async throws -> [HomebrewTap] {
+        recordedOperations.append(.installedTaps)
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+        return installedTapsResult
+    }
+
+    func addTap(name: String, disablesTapTrustChecks: Bool) async throws {
+        recordedOperations.append(.addTap(name))
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+        let formulaName = name.split(separator: "/").last.map(String.init) ?? name
+        installedTapsResult.append(
+            HomebrewTap(name: name, formulaNames: ["\(name)/\(formulaName)"])
+        )
+    }
+
+    func removeTap(name: String, disablesTapTrustChecks: Bool) async throws {
+        recordedOperations.append(.removeTap(name))
+        recordedTrustCheckSettings.append(disablesTapTrustChecks)
+        installedTapsResult.removeAll { $0.name == name }
     }
 
     func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {
