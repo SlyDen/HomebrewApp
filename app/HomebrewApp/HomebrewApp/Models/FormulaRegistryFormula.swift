@@ -46,7 +46,8 @@ nonisolated struct FormulaRegistryFormula: Decodable, Equatable, Hashable, Ident
 
     /// Public Homebrew Formulae detail page for this formula.
     var registryPage: URL? {
-        URL(string: "https://formulae.brew.sh/formula/\(name)")
+        guard tap == "homebrew/core" else { return nil }
+        return URL(string: "https://formulae.brew.sh/formula/\(name)")
     }
 
     private enum CodingKeys: String, CodingKey {

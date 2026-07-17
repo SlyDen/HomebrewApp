@@ -7,7 +7,13 @@ import Observation
 final class FormulaRegistryStore {
     @ObservationIgnored private let service: any FormulaRegistryServicing
 
-    /// Complete formula catalog returned by Homebrew.
+    /// Formulae fetched from the public Homebrew registry before local tap merging.
+    private var registryFormulae: [FormulaRegistryFormula] = []
+
+    /// Formula names discovered from taps installed on this Mac.
+    private var tappedFormulae: [FormulaRegistryFormula] = []
+
+    /// Complete searchable catalog from the public registry and installed taps.
     private(set) var formulae: [FormulaRegistryFormula] = []
 
     /// Prepared formula results matching the current query.
@@ -40,7 +46,7 @@ final class FormulaRegistryStore {
     /// Loads the registry once, or revalidates it when explicitly requested.
     func load(forceRefresh: Bool = false) async {
         guard isLoading == false else { return }
-        guard forceRefresh || formulae.isEmpty else { return }
+        guard forceRefresh || registryFormulae.isEmpty else { return }
 
         isLoading = true
         errorMessage = nil
@@ -49,10 +55,8 @@ final class FormulaRegistryStore {
         do {
             let incomingFormulae = try await service.fetchFormulae(forceRefresh: forceRefresh)
             try Task.checkCancellation()
-            formulae = incomingFormulae.sorted {
-                $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            }
-            updateSearchResults()
+            registryFormulae = incomingFormulae
+            rebuildCatalog()
         } catch is CancellationError {
             return
         } catch {
@@ -63,6 +67,24 @@ final class FormulaRegistryStore {
     /// Clears the most recent registry load error.
     func clearError() {
         errorMessage = nil
+    }
+
+    /// Replaces formula names supplied by installed taps and updates current search.
+    func setTappedFormulae(_ formulae: [FormulaRegistryFormula]) {
+        tappedFormulae = formulae
+        rebuildCatalog()
+    }
+
+    /// Merges registry metadata with locally tapped formula names using full names as identity.
+    private func rebuildCatalog() {
+        var formulaeByID = Dictionary(uniqueKeysWithValues: registryFormulae.map { ($0.id, $0) })
+        for formula in tappedFormulae where formulaeByID[formula.id] == nil {
+            formulaeByID[formula.id] = formula
+        }
+        formulae = formulaeByID.values.sorted {
+            $0.fullName.localizedStandardCompare($1.fullName) == .orderedAscending
+        }
+        updateSearchResults()
     }
 
     /// Updates the cached result set only when the catalog or query changes.

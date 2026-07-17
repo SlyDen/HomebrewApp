@@ -75,6 +75,24 @@ struct FormulaRegistryStoreTests {
 
         #expect(store.searchResults.map(\.name) == ["git", "libpq", "ripgrep"])
     }
+
+    @Test func includesFormulaeFromInstalledTapsInSearch() async {
+        let store = FormulaRegistryStore(
+            service: StubFormulaRegistryService(formulae: FormulaRegistryFixtures.formulae)
+        )
+        store.setTappedFormulae(
+            HomebrewTap(
+                name: "darrylmorley/whatcable",
+                formulaNames: ["darrylmorley/whatcable/whatcable"]
+            ).formulae
+        )
+        await store.load()
+
+        store.searchText = "whatcable"
+
+        #expect(store.searchResults.map(\.fullName) == ["darrylmorley/whatcable/whatcable"])
+        #expect(store.selectedFormula?.tap == "darrylmorley/whatcable")
+    }
 }
 
 private nonisolated struct StubFormulaRegistryService: FormulaRegistryServicing {

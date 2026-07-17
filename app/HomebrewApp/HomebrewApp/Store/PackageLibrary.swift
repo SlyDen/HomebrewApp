@@ -57,6 +57,21 @@ final class PackageLibrary {
     /// Pre-encoded JSON data used by `PackageExportDocument`.
     var exportData: Data?
 
+    /// Installed Homebrew taps available to the formula browser.
+    private(set) var taps: [HomebrewTap] = []
+
+    /// Searchable formula names contributed by installed taps.
+    private(set) var tappedFormulae: [FormulaRegistryFormula] = []
+
+    /// Whether a tap list or mutation command is currently running.
+    private(set) var isLoadingTaps = false
+
+    /// User-facing status for the active tap operation.
+    private(set) var tapOperationMessage: String?
+
+    /// User-facing failure from the most recent tap operation.
+    var tapErrorMessage: String?
+
     /// Identifies the command whose streamed callbacks may update live progress.
     @ObservationIgnored private var activeProgressSessionID: UUID?
 
@@ -101,10 +116,11 @@ final class PackageLibrary {
     /// installed package snapshot afterward.
     ///
     /// - Parameters:
-    ///   - formulaName: Exact formula name published by the registry.
+    ///   - formulaName: Short or tap-qualified formula name published by Homebrew.
     ///   - context: SwiftData model context used by the follow-up refresh.
     func installFormula(named formulaName: String, context: ModelContext) async {
-        guard !isLoading, !isFormulaInstalled(named: formulaName) else { return }
+        let installedName = formulaName.split(separator: "/").last.map(String.init) ?? formulaName
+        guard !isLoading, !isFormulaInstalled(named: installedName) else { return }
 
         isLoading = true
         errorMessage = nil
@@ -455,5 +471,124 @@ final class PackageLibrary {
         case .update:
             "brew upgrade \(package.name)"
         }
+    }
+}
+
+extension PackageLibrary {
+    /// Refreshes installed taps and rebuilds the formulae they contribute to search.
+    func refreshTaps() async {
+        guard isLoadingTaps == false, isLoading == false else { return }
+
+        isLoadingTaps = true
+        tapErrorMessage = nil
+        tapOperationMessage = String(localized: "Loading installed taps")
+        appendLog(
+            .state,
+            "Refreshing formula taps",
+            detail: "Fetching installed taps and formula names from Homebrew."
+        )
+        appendLog(.command, "Executing command", detail: "brew tap-info --installed --json")
+        defer { finishTapOperation() }
+
+        do {
+            try await reloadTaps()
+            appendLog(
+                .success,
+                "Formula taps refreshed",
+                detail: "Found \(taps.count) installed taps and \(tappedFormulae.count) tapped formulae."
+            )
+        } catch is CancellationError {
+            appendLog(.info, "Tap refresh cancelled")
+        } catch {
+            tapErrorMessage = error.localizedDescription
+            appendLog(.error, "Tap refresh failed", detail: error.localizedDescription)
+        }
+    }
+
+    /// Adds a validated tap and refreshes its searchable formula names.
+    ///
+    /// - Parameter input: User-entered tap name in `user/repository` form.
+    /// - Returns: Whether the tap was added and the local tap snapshot refreshed.
+    @discardableResult
+    func addTap(named input: String) async -> Bool {
+        guard let tapName = HomebrewTap.normalizedName(input) else {
+            tapErrorMessage = String(localized: "Enter a tap name in user/repository format.")
+            return false
+        }
+        guard taps.contains(where: { $0.name == tapName }) == false else {
+            tapErrorMessage = String(localized: "This tap is already installed.")
+            return false
+        }
+        guard isLoadingTaps == false, isLoading == false else { return false }
+
+        isLoadingTaps = true
+        tapErrorMessage = nil
+        tapOperationMessage = String(localized: "Adding \(tapName)")
+        appendLog(.state, "Adding formula tap", detail: "Tap: \(tapName)")
+        appendLog(.command, "Executing command", detail: "brew tap \(tapName)")
+        defer { finishTapOperation() }
+
+        do {
+            try await service.addTap(name: tapName, disablesTapTrustChecks: disablesTapTrustChecks)
+            appendLog(.success, "Formula tap added", detail: "Refreshing formula names from \(tapName).")
+            try await reloadTaps()
+            return true
+        } catch is CancellationError {
+            appendLog(.info, "Tap addition cancelled", detail: "Tap: \(tapName)")
+            return false
+        } catch {
+            tapErrorMessage = error.localizedDescription
+            appendLog(.error, "Tap addition failed", detail: error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Removes a tap and removes its formula names from search.
+    ///
+    /// - Parameter tap: Installed tap selected by the user.
+    @discardableResult
+    func removeTap(_ tap: HomebrewTap) async -> Bool {
+        guard isLoadingTaps == false, isLoading == false else { return false }
+
+        isLoadingTaps = true
+        tapErrorMessage = nil
+        tapOperationMessage = String(localized: "Removing \(tap.name)")
+        appendLog(.state, "Removing formula tap", detail: "Tap: \(tap.name)")
+        appendLog(.command, "Executing command", detail: "brew untap \(tap.name)")
+        defer { finishTapOperation() }
+
+        do {
+            try await service.removeTap(name: tap.name, disablesTapTrustChecks: disablesTapTrustChecks)
+            appendLog(
+                .success,
+                "Formula tap removed",
+                detail: "Refreshing installed taps after removing \(tap.name)."
+            )
+            try await reloadTaps()
+            return true
+        } catch is CancellationError {
+            appendLog(.info, "Tap removal cancelled", detail: "Tap: \(tap.name)")
+            return false
+        } catch {
+            tapErrorMessage = error.localizedDescription
+            appendLog(.error, "Tap removal failed", detail: error.localizedDescription)
+            return false
+        }
+    }
+
+    /// Replaces tap state from the service and prepares a stable formula array for search.
+    private func reloadTaps() async throws {
+        let incomingTaps = try await service.installedTaps(disablesTapTrustChecks: disablesTapTrustChecks)
+        try Task.checkCancellation()
+        taps = incomingTaps
+        tappedFormulae = incomingTaps
+            .flatMap(\.formulae)
+            .sorted { $0.fullName.localizedStandardCompare($1.fullName) == .orderedAscending }
+    }
+
+    /// Returns tap operation state to idle after success, failure, or cancellation.
+    private func finishTapOperation() {
+        tapOperationMessage = nil
+        isLoadingTaps = false
     }
 }

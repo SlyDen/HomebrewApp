@@ -52,6 +52,11 @@ struct FormulaRegistryView: View {
         .task {
             library.disablesTapTrustChecks = disablesTapTrustChecks
 
+            if isHomebrewProviderEnabled {
+                await library.refreshTaps()
+                store.setTappedFormulae(library.tappedFormulae)
+            }
+
             guard library.packages.isEmpty else { return }
 
             do {
@@ -67,6 +72,9 @@ struct FormulaRegistryView: View {
         }
         .onChange(of: disablesTapTrustChecks) { _, isDisabled in
             library.disablesTapTrustChecks = isDisabled
+        }
+        .onChange(of: library.tappedFormulae) { _, formulae in
+            store.setTappedFormulae(formulae)
         }
     }
 }
