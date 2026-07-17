@@ -4,7 +4,7 @@ import Testing
 @testable import HomebrewApp
 
 struct PackageLibraryTapTests {
-    @Test @MainActor func addsAndRemovesTapWhileRefreshingSearchableFormulae() async throws {
+    @Test @MainActor func addsAndRemovesTapWhileRefreshingSearchablePackages() async throws {
         let service = RecordingHomebrewService()
         let library = PackageLibrary(service: service)
         library.disablesTapTrustChecks = true
@@ -13,14 +13,20 @@ struct PackageLibraryTapTests {
 
         #expect(didAdd)
         #expect(library.taps.map(\.name) == ["darrylmorley/whatcable"])
-        #expect(library.tappedFormulae.map(\.fullName) == ["darrylmorley/whatcable/whatcable"])
+        #expect(
+            library.tappedCatalogItems.map(\.fullName) == [
+                "darrylmorley/whatcable/whatcable",
+                "darrylmorley/whatcable/whatcable-cli"
+            ]
+        )
+        #expect(library.tappedCatalogItems.map(\.kind) == [.cask, .formula])
         let tap = try #require(library.taps.first)
 
         let didRemove = await library.removeTap(tap)
 
         #expect(didRemove)
         #expect(library.taps.isEmpty)
-        #expect(library.tappedFormulae.isEmpty)
+        #expect(library.tappedCatalogItems.isEmpty)
         #expect(
             service.recordedOperations == [
                 .addTap("darrylmorley/whatcable"),
@@ -43,14 +49,51 @@ struct PackageLibraryTapTests {
         #expect(service.recordedOperations.isEmpty)
     }
 
-    @Test @MainActor func doesNotReinstallInstalledTappedFormula() async throws {
+    @Test @MainActor func installsQualifiedTappedCaskAndRefreshesPackages() async throws {
+        let installedCask = InstalledPackageDTO(
+            name: "whatcable",
+            kind: .cask,
+            summary: "USB-C cable information",
+            homepage: nil,
+            installedVersions: [
+                InstalledVersionDTO(version: "1.0.0", isActive: true, installedOn: nil)
+            ],
+            installedOn: Date(timeIntervalSince1970: 0)
+        )
+        let service = RecordingHomebrewService(installedPackagesResult: [installedCask])
+        let library = PackageLibrary(service: service)
+        let context = try makeModelContext()
+
+        await library.installPackage(
+            named: "darrylmorley/whatcable/whatcable",
+            kind: .cask,
+            context: context
+        )
+
+        #expect(
+            service.recordedOperations == [
+                .installPackage("darrylmorley/whatcable/whatcable", .cask),
+                .installedPackages
+            ]
+        )
+        #expect(library.isPackageInstalled(named: "whatcable", kind: .cask))
+        #expect(
+            library.logs.contains {
+                $0.detail == "brew install --cask darrylmorley/whatcable/whatcable"
+            }
+        )
+        #expect(library.errorMessage == nil)
+        #expect(library.isLoading == false)
+    }
+
+    @Test @MainActor func doesNotReinstallInstalledTappedCask() async throws {
         let service = RecordingHomebrewService()
         let library = PackageLibrary(service: service)
         let context = try makeModelContext()
         library.packages = [
             InstalledPackageDTO(
                 name: "whatcable",
-                kind: .formula,
+                kind: .cask,
                 summary: "Find the cable for a device",
                 homepage: nil,
                 installedVersions: [
@@ -60,7 +103,11 @@ struct PackageLibraryTapTests {
             )
         ]
 
-        await library.installFormula(named: "darrylmorley/whatcable/whatcable", context: context)
+        await library.installPackage(
+            named: "darrylmorley/whatcable/whatcable",
+            kind: .cask,
+            context: context
+        )
 
         #expect(service.recordedOperations.isEmpty)
     }

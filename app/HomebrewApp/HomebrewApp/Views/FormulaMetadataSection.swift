@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Name, tap, version, license, and alias metadata for a formula.
+/// Name, type, tap, and available registry metadata for a package.
 struct FormulaMetadataSection: View {
+    let kind: ManagedPackageKind
     let fullName: String
     let tap: String
     let stableVersion: String?
@@ -12,31 +13,34 @@ struct FormulaMetadataSection: View {
     /// Registry metadata labels.
     var body: some View {
         Section("Details") {
+            LabeledContent("Type", value: kind.title)
             LabeledContent("Full Name", value: fullName)
             LabeledContent("Tap", value: tap)
 
-            LabeledContent("Stable Version") {
-                if let stableVersion {
-                    Text(stableVersion)
-                } else {
-                    Text("Not reported")
+            if kind == .formula {
+                LabeledContent("Stable Version") {
+                    if let stableVersion {
+                        Text(stableVersion)
+                    } else {
+                        Text("Not reported")
+                    }
                 }
-            }
 
-            if let headVersion {
-                LabeledContent("Head Version", value: headVersion)
-            }
-
-            LabeledContent("License") {
-                if let license, license.isEmpty == false {
-                    Text(license)
-                } else {
-                    Text("Not reported")
+                if let headVersion {
+                    LabeledContent("Head Version", value: headVersion)
                 }
-            }
 
-            if aliases.isEmpty == false {
-                LabeledContent("Aliases", value: aliases.formatted())
+                LabeledContent("License") {
+                    if let license, license.isEmpty == false {
+                        Text(license)
+                    } else {
+                        Text("Not reported")
+                    }
+                }
+
+                if aliases.isEmpty == false {
+                    LabeledContent("Aliases", value: aliases.formatted())
+                }
             }
         }
     }

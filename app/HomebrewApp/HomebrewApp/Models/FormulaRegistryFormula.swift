@@ -1,9 +1,16 @@
 import Foundation
 
-/// A formula returned by the public Homebrew Formulae JSON API.
+/// A formula or cask available to install from Homebrew.
+///
+/// Public API records provide full metadata for formulae. Casks contributed by
+/// locally installed taps use the same catalog shape with package-kind identity
+/// and the metadata Homebrew exposes through `tap-info`.
 nonisolated struct FormulaRegistryFormula: Decodable, Equatable, Hashable, Identifiable, Sendable {
     /// Stable registry identity used for list diffing and selection.
-    var id: String { fullName }
+    var id: String { "\(kind.rawValue):\(fullName)" }
+
+    /// Homebrew package category used to choose install semantics.
+    let kind: ManagedPackageKind
 
     /// Short formula name accepted by `brew install`.
     let name: String
@@ -46,7 +53,7 @@ nonisolated struct FormulaRegistryFormula: Decodable, Equatable, Hashable, Ident
 
     /// Public Homebrew Formulae detail page for this formula.
     var registryPage: URL? {
-        guard tap == "homebrew/core" else { return nil }
+        guard kind == .formula, tap == "homebrew/core" else { return nil }
         return URL(string: "https://formulae.brew.sh/formula/\(name)")
     }
 
@@ -69,6 +76,7 @@ nonisolated struct FormulaRegistryFormula: Decodable, Equatable, Hashable, Ident
     /// Decodes the stable subset of the additive Homebrew formula schema used by the app.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = .formula
         name = try container.decode(String.self, forKey: .name)
         fullName = try container.decodeIfPresent(String.self, forKey: .fullName) ?? name
         tap = try container.decodeIfPresent(String.self, forKey: .tap) ?? "homebrew/core"
@@ -94,6 +102,7 @@ nonisolated struct FormulaRegistryFormula: Decodable, Equatable, Hashable, Ident
     /// Creates a formula value directly for previews and tests.
     init(
         name: String,
+        kind: ManagedPackageKind = .formula,
         fullName: String? = nil,
         tap: String = "homebrew/core",
         aliases: [String] = [],
@@ -107,6 +116,7 @@ nonisolated struct FormulaRegistryFormula: Decodable, Equatable, Hashable, Ident
         isDeprecated: Bool = false,
         isDisabled: Bool = false
     ) {
+        self.kind = kind
         self.name = name
         self.fullName = fullName ?? name
         self.tap = tap

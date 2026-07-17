@@ -1,7 +1,7 @@
 import SwiftData
 import SwiftUI
 
-/// Searchable browser for formulae published by the official Homebrew registry.
+/// Searchable browser for public formulae and packages from installed taps.
 struct FormulaRegistryView: View {
     @Environment(\.modelContext) private var modelContext
     @Bindable var store: FormulaRegistryStore
@@ -19,18 +19,18 @@ struct FormulaRegistryView: View {
             )
                 .navigationSplitViewColumnWidth(min: 360, ideal: 460, max: 560)
         } detail: {
-            if let formula = store.selectedFormula {
+            if let package = store.selectedFormula {
                 FormulaRegistryDetailView(
-                    formula: formula,
+                    formula: package,
                     isHomebrewProviderEnabled: isHomebrewProviderEnabled,
                     library: library
                 )
                     .navigationSplitViewColumnWidth(min: 420, ideal: 760)
             } else {
                 ContentUnavailableView(
-                    "Select a Formula",
+                    "Select a Package",
                     systemImage: "shippingbox",
-                    description: Text("Choose a registry result to view its versions, dependencies, and links.")
+                    description: Text("Choose a catalog result to view its details and installation action.")
                 )
                 .navigationSplitViewColumnWidth(min: 420, ideal: 760)
             }
@@ -54,7 +54,7 @@ struct FormulaRegistryView: View {
 
             if isHomebrewProviderEnabled {
                 await library.refreshTaps()
-                store.setTappedFormulae(library.tappedFormulae)
+                store.setTappedCatalogItems(library.tappedCatalogItems)
             }
 
             guard library.packages.isEmpty else { return }
@@ -73,8 +73,8 @@ struct FormulaRegistryView: View {
         .onChange(of: disablesTapTrustChecks) { _, isDisabled in
             library.disablesTapTrustChecks = isDisabled
         }
-        .onChange(of: library.tappedFormulae) { _, formulae in
-            store.setTappedFormulae(formulae)
+        .onChange(of: library.tappedCatalogItems) { _, packages in
+            store.setTappedCatalogItems(packages)
         }
     }
 }

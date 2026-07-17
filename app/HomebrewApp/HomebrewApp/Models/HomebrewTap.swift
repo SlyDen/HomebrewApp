@@ -1,6 +1,6 @@
 import Foundation
 
-/// One Homebrew tap and the formulae it makes available locally.
+/// One Homebrew tap and the formulae and casks it makes available locally.
 nonisolated struct HomebrewTap: Decodable, Equatable, Identifiable, Sendable {
     /// Canonical `user/repository` tap name.
     let name: String
@@ -11,11 +11,14 @@ nonisolated struct HomebrewTap: Decodable, Equatable, Identifiable, Sendable {
     /// Whether Homebrew maintains the tap.
     let isOfficial: Bool
 
-    /// Whether Homebrew trusts formulae from the tap without an override.
+    /// Whether Homebrew trusts packages from the tap without an override.
     let isTrusted: Bool
 
     /// Fully qualified formula names made available by this tap.
     let formulaNames: [String]
+
+    /// Fully qualified cask tokens made available by this tap.
+    let caskTokens: [String]
 
     /// Git remote backing the tap, when Homebrew reports one.
     let remote: String?
@@ -32,6 +35,28 @@ nonisolated struct HomebrewTap: Decodable, Equatable, Identifiable, Sendable {
                 tap: name
             )
         }
+    }
+
+    /// Searchable cask placeholders for metadata that is only available locally.
+    var casks: [FormulaRegistryFormula] {
+        caskTokens.map { fullName in
+            FormulaRegistryFormula(
+                name: fullName.split(separator: "/").last.map(String.init) ?? fullName,
+                kind: .cask,
+                fullName: fullName,
+                tap: name
+            )
+        }
+    }
+
+    /// Complete searchable package set contributed by this tap.
+    var catalogItems: [FormulaRegistryFormula] {
+        formulae + casks
+    }
+
+    /// Number of formulae and casks made available by this tap.
+    var packageCount: Int {
+        formulaNames.count + caskTokens.count
     }
 
     /// Normalizes and validates a tap name entered as `user/repository`.
@@ -56,6 +81,7 @@ nonisolated struct HomebrewTap: Decodable, Equatable, Identifiable, Sendable {
         isOfficial: Bool = false,
         isTrusted: Bool = false,
         formulaNames: [String] = [],
+        caskTokens: [String] = [],
         remote: String? = nil
     ) {
         self.name = name
@@ -63,6 +89,7 @@ nonisolated struct HomebrewTap: Decodable, Equatable, Identifiable, Sendable {
         self.isOfficial = isOfficial
         self.isTrusted = isTrusted
         self.formulaNames = formulaNames
+        self.caskTokens = caskTokens
         self.remote = remote
     }
 
@@ -72,6 +99,7 @@ nonisolated struct HomebrewTap: Decodable, Equatable, Identifiable, Sendable {
         case isOfficial = "official"
         case isTrusted = "trusted"
         case formulaNames = "formula_names"
+        case caskTokens = "cask_tokens"
         case remote
     }
 
@@ -83,6 +111,7 @@ nonisolated struct HomebrewTap: Decodable, Equatable, Identifiable, Sendable {
         isOfficial = try container.decodeIfPresent(Bool.self, forKey: .isOfficial) ?? false
         isTrusted = try container.decodeIfPresent(Bool.self, forKey: .isTrusted) ?? false
         formulaNames = try container.decodeIfPresent([String].self, forKey: .formulaNames) ?? []
+        caskTokens = try container.decodeIfPresent([String].self, forKey: .caskTokens) ?? []
         remote = try container.decodeIfPresent(String.self, forKey: .remote)
     }
 }

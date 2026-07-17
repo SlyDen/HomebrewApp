@@ -147,11 +147,11 @@ struct HomebrewAppTests {
         let context = try makeModelContext()
         library.disablesTapTrustChecks = true
 
-        await library.installFormula(named: "wget", context: context)
+        await library.installPackage(named: "wget", kind: .formula, context: context)
 
-        #expect(service.recordedOperations == [.installFormula("wget"), .installedPackages])
+        #expect(service.recordedOperations == [.installPackage("wget", .formula), .installedPackages])
         #expect(service.recordedTrustCheckSettings == [true, true])
-        #expect(library.isFormulaInstalled(named: "wget"))
+        #expect(library.isPackageInstalled(named: "wget", kind: .formula))
         #expect(library.errorMessage == nil)
         #expect(library.isLoading == false)
         #expect(library.logs.contains { $0.title == "Formula installed" })
@@ -162,9 +162,9 @@ struct HomebrewAppTests {
         let library = PackageLibrary(service: service)
         let context = try makeModelContext()
 
-        await library.installFormula(named: "wget", context: context)
+        await library.installPackage(named: "wget", kind: .formula, context: context)
 
-        #expect(service.recordedOperations == [.installFormula("wget")])
+        #expect(service.recordedOperations == [.installPackage("wget", .formula)])
         #expect(library.errorMessage == TestServiceError.installFailed.localizedDescription)
         #expect(library.isLoading == false)
         #expect(library.logs.contains { $0.title == "Formula installation failed" })
@@ -236,7 +236,7 @@ struct HomebrewAppTests {
 }
 
 enum RecordedHomebrewOperation: Equatable, Sendable {
-    case installFormula(String)
+    case installPackage(String, ManagedPackageKind)
     case installedTaps
     case addTap(String)
     case removeTap(String)
@@ -302,9 +302,12 @@ final class RecordingHomebrewService: HomebrewServicing {
     func addTap(name: String, disablesTapTrustChecks: Bool) async throws {
         recordedOperations.append(.addTap(name))
         recordedTrustCheckSettings.append(disablesTapTrustChecks)
-        let formulaName = name.split(separator: "/").last.map(String.init) ?? name
         installedTapsResult.append(
-            HomebrewTap(name: name, formulaNames: ["\(name)/\(formulaName)"])
+            HomebrewTap(
+                name: name,
+                formulaNames: ["\(name)/whatcable-cli"],
+                caskTokens: ["\(name)/whatcable"]
+            )
         )
     }
 
@@ -314,8 +317,12 @@ final class RecordingHomebrewService: HomebrewServicing {
         installedTapsResult.removeAll { $0.name == name }
     }
 
-    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {
-        recordedOperations.append(.installFormula(packageName))
+    func installPackage(
+        packageName: String,
+        kind: ManagedPackageKind,
+        disablesTapTrustChecks: Bool
+    ) async throws {
+        recordedOperations.append(.installPackage(packageName, kind))
         recordedTrustCheckSettings.append(disablesTapTrustChecks)
         if let installError {
             throw installError

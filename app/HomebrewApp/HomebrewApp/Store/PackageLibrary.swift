@@ -57,11 +57,11 @@ final class PackageLibrary {
     /// Pre-encoded JSON data used by `PackageExportDocument`.
     var exportData: Data?
 
-    /// Installed Homebrew taps available to the formula browser.
+    /// Installed Homebrew taps available to the package catalog.
     private(set) var taps: [HomebrewTap] = []
 
-    /// Searchable formula names contributed by installed taps.
-    private(set) var tappedFormulae: [FormulaRegistryFormula] = []
+    /// Searchable formulae and casks contributed by installed taps.
+    private(set) var tappedCatalogItems: [FormulaRegistryFormula] = []
 
     /// Whether a tap list or mutation command is currently running.
     private(set) var isLoadingTaps = false
@@ -103,44 +103,60 @@ final class PackageLibrary {
         return packages.first { $0.id == selectedPackageID }
     }
 
-    /// Returns whether Homebrew currently reports the named formula as installed.
+    /// Returns whether Homebrew currently reports the named package as installed.
     ///
-    /// - Parameter name: Exact formula name published by the registry.
-    func isFormulaInstalled(named name: String) -> Bool {
+    /// - Parameters:
+    ///   - name: Exact package name or cask token published by Homebrew.
+    ///   - kind: Package category that must match the installed snapshot.
+    func isPackageInstalled(named name: String, kind: ManagedPackageKind) -> Bool {
         packages.contains { package in
-            package.kind == .formula && package.name == name
+            package.kind == kind && package.name == name
         }
     }
 
-    /// Installs a formula selected from the Homebrew registry and refreshes the
+    /// Installs a package selected from the Homebrew catalog and refreshes the
     /// installed package snapshot afterward.
     ///
     /// - Parameters:
-    ///   - formulaName: Short or tap-qualified formula name published by Homebrew.
+    ///   - packageName: Short or tap-qualified package name published by Homebrew.
+    ///   - kind: Whether the package is a formula or cask.
     ///   - context: SwiftData model context used by the follow-up refresh.
-    func installFormula(named formulaName: String, context: ModelContext) async {
-        let installedName = formulaName.split(separator: "/").last.map(String.init) ?? formulaName
-        guard !isLoading, !isFormulaInstalled(named: installedName) else { return }
+    func installPackage(
+        named packageName: String,
+        kind: ManagedPackageKind,
+        context: ModelContext
+    ) async {
+        let installedName = packageName.split(separator: "/").last.map(String.init) ?? packageName
+        guard !isLoading, !isPackageInstalled(named: installedName, kind: kind) else { return }
 
         isLoading = true
         errorMessage = nil
-        currentCommandProgress = "Installing \(formulaName)"
-        appendLog(.state, "Installing formula", detail: "Formula: \(formulaName)")
-        appendLog(.command, "Executing command", detail: "brew install --formula \(formulaName)")
+        currentCommandProgress = "Installing \(packageName)"
+        appendLog(
+            .state,
+            "Installing \(kind.title.lowercased())",
+            detail: "Package: \(packageName)"
+        )
+        appendLog(.command, "Executing command", detail: installCommand(packageName: packageName, kind: kind))
 
         do {
-            try await service.installFormula(
-                packageName: formulaName,
+            try await service.installPackage(
+                packageName: packageName,
+                kind: kind,
                 disablesTapTrustChecks: disablesTapTrustChecks
             )
-            appendLog(.success, "Formula installed", detail: "Refreshing installed packages after \(formulaName).")
+            appendLog(
+                .success,
+                "\(kind.title) installed",
+                detail: "Refreshing installed packages after \(packageName)."
+            )
             currentCommandProgress = "Refreshing installed packages"
             await refresh(from: context)
         } catch is CancellationError {
-            appendLog(.info, "Formula installation cancelled", detail: "Formula: \(formulaName)")
+            appendLog(.info, "\(kind.title) installation cancelled", detail: "Package: \(packageName)")
         } catch {
             errorMessage = error.localizedDescription
-            appendLog(.error, "Formula installation failed", detail: error.localizedDescription)
+            appendLog(.error, "\(kind.title) installation failed", detail: error.localizedDescription)
         }
 
         currentCommandProgress = nil
@@ -472,10 +488,15 @@ final class PackageLibrary {
             "brew upgrade \(package.name)"
         }
     }
+
+    /// User-facing Homebrew command for a type-qualified package installation.
+    private func installCommand(packageName: String, kind: ManagedPackageKind) -> String {
+        HomebrewInstallCommand(packageName: packageName, kind: kind).displayString
+    }
 }
 
 extension PackageLibrary {
-    /// Refreshes installed taps and rebuilds the formulae they contribute to search.
+    /// Refreshes installed taps and rebuilds the packages they contribute to search.
     func refreshTaps() async {
         guard isLoadingTaps == false, isLoading == false else { return }
 
@@ -484,8 +505,8 @@ extension PackageLibrary {
         tapOperationMessage = String(localized: "Loading installed taps")
         appendLog(
             .state,
-            "Refreshing formula taps",
-            detail: "Fetching installed taps and formula names from Homebrew."
+            "Refreshing Homebrew taps",
+            detail: "Fetching installed taps, formulae, and casks from Homebrew."
         )
         appendLog(.command, "Executing command", detail: "brew tap-info --installed --json")
         defer { finishTapOperation() }
@@ -494,8 +515,8 @@ extension PackageLibrary {
             try await reloadTaps()
             appendLog(
                 .success,
-                "Formula taps refreshed",
-                detail: "Found \(taps.count) installed taps and \(tappedFormulae.count) tapped formulae."
+                "Homebrew taps refreshed",
+                detail: "Found \(taps.count) installed taps and \(tappedCatalogItems.count) tapped packages."
             )
         } catch is CancellationError {
             appendLog(.info, "Tap refresh cancelled")
@@ -524,13 +545,13 @@ extension PackageLibrary {
         isLoadingTaps = true
         tapErrorMessage = nil
         tapOperationMessage = String(localized: "Adding \(tapName)")
-        appendLog(.state, "Adding formula tap", detail: "Tap: \(tapName)")
+        appendLog(.state, "Adding Homebrew tap", detail: "Tap: \(tapName)")
         appendLog(.command, "Executing command", detail: "brew tap \(tapName)")
         defer { finishTapOperation() }
 
         do {
             try await service.addTap(name: tapName, disablesTapTrustChecks: disablesTapTrustChecks)
-            appendLog(.success, "Formula tap added", detail: "Refreshing formula names from \(tapName).")
+            appendLog(.success, "Homebrew tap added", detail: "Refreshing packages from \(tapName).")
             try await reloadTaps()
             return true
         } catch is CancellationError {
@@ -543,7 +564,7 @@ extension PackageLibrary {
         }
     }
 
-    /// Removes a tap and removes its formula names from search.
+    /// Removes a tap and removes its packages from search.
     ///
     /// - Parameter tap: Installed tap selected by the user.
     @discardableResult
@@ -553,7 +574,7 @@ extension PackageLibrary {
         isLoadingTaps = true
         tapErrorMessage = nil
         tapOperationMessage = String(localized: "Removing \(tap.name)")
-        appendLog(.state, "Removing formula tap", detail: "Tap: \(tap.name)")
+        appendLog(.state, "Removing Homebrew tap", detail: "Tap: \(tap.name)")
         appendLog(.command, "Executing command", detail: "brew untap \(tap.name)")
         defer { finishTapOperation() }
 
@@ -561,7 +582,7 @@ extension PackageLibrary {
             try await service.removeTap(name: tap.name, disablesTapTrustChecks: disablesTapTrustChecks)
             appendLog(
                 .success,
-                "Formula tap removed",
+                "Homebrew tap removed",
                 detail: "Refreshing installed taps after removing \(tap.name)."
             )
             try await reloadTaps()
@@ -576,13 +597,13 @@ extension PackageLibrary {
         }
     }
 
-    /// Replaces tap state from the service and prepares a stable formula array for search.
+    /// Replaces tap state and prepares a stable package array for search.
     private func reloadTaps() async throws {
         let incomingTaps = try await service.installedTaps(disablesTapTrustChecks: disablesTapTrustChecks)
         try Task.checkCancellation()
         taps = incomingTaps
-        tappedFormulae = incomingTaps
-            .flatMap(\.formulae)
+        tappedCatalogItems = incomingTaps
+            .flatMap(\.catalogItems)
             .sorted { $0.fullName.localizedStandardCompare($1.fullName) == .orderedAscending }
     }
 

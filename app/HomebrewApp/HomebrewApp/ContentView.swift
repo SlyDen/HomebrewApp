@@ -26,7 +26,7 @@ struct ContentView: View {
                 )
             }
 
-            Tab("Formulae", systemImage: "magnifyingglass") {
+            Tab("Discover", systemImage: "magnifyingglass") {
                 FormulaRegistryView(
                     store: formulaRegistry,
                     library: library,
