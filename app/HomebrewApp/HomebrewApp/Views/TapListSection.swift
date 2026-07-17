@@ -21,7 +21,7 @@ struct TapListSection: View {
                         .foregroundStyle(.secondary)
                 }
             } else if taps.isEmpty {
-                Label("No formula taps are installed.", systemImage: "tray")
+                Label("No third-party taps are installed.", systemImage: "tray")
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(taps) { tap in

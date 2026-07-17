@@ -9,7 +9,7 @@ protocol HomebrewServicing: Sendable {
     /// Returns the packages currently installed by the backing package manager.
     func installedPackages(disablesTapTrustChecks: Bool) async throws -> [InstalledPackageDTO]
 
-    /// Returns installed taps and the fully qualified formula names they publish.
+    /// Returns installed taps and the fully qualified package names they publish.
     ///
     /// - Parameter disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
     func installedTaps(disablesTapTrustChecks: Bool) async throws -> [HomebrewTap]
@@ -28,12 +28,17 @@ protocol HomebrewServicing: Sendable {
     ///   - disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
     func removeTap(name: String, disablesTapTrustChecks: Bool) async throws
 
-    /// Installs a formula from the Homebrew registry.
+    /// Installs a formula or cask from the Homebrew catalog.
     ///
     /// - Parameters:
-    ///   - packageName: Short or tap-qualified formula name published by Homebrew.
+    ///   - packageName: Short or tap-qualified package name published by Homebrew.
+    ///   - kind: Whether Homebrew should resolve the package as a formula or cask.
     ///   - disablesTapTrustChecks: Whether to bypass non-official tap trust checks.
-    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws
+    func installPackage(
+        packageName: String,
+        kind: ManagedPackageKind,
+        disablesTapTrustChecks: Bool
+    ) async throws
 
     /// Fetches the newest Homebrew and formula metadata before package upgrades.
     func updateHomebrew(disablesTapTrustChecks: Bool) async throws
@@ -169,7 +174,8 @@ struct MockHomebrewService: HomebrewServicing {
         [
             HomebrewTap(
                 name: "darrylmorley/whatcable",
-                formulaNames: ["darrylmorley/whatcable/whatcable"],
+                formulaNames: ["darrylmorley/whatcable/whatcable-cli"],
+                caskTokens: ["darrylmorley/whatcable/whatcable"],
                 remote: "https://github.com/darrylmorley/homebrew-whatcable"
             )
         ]
@@ -181,8 +187,12 @@ struct MockHomebrewService: HomebrewServicing {
     /// No-op sample tap removal.
     func removeTap(name: String, disablesTapTrustChecks: Bool) async throws {}
 
-    /// No-op sample formula installation.
-    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {}
+    /// No-op sample package installation.
+    func installPackage(
+        packageName: String,
+        kind: ManagedPackageKind,
+        disablesTapTrustChecks: Bool
+    ) async throws {}
 
     /// No-op sample Homebrew metadata update.
     func updateHomebrew(disablesTapTrustChecks: Bool) async throws {}
@@ -241,10 +251,15 @@ struct HomebrewCLIService: HomebrewServicing {
         }
     }
 
-    /// Runs `brew install --formula` for a formula selected from the registry.
-    func installFormula(packageName: String, disablesTapTrustChecks: Bool) async throws {
+    /// Runs a type-qualified install for a package selected from the catalog.
+    func installPackage(
+        packageName: String,
+        kind: ManagedPackageKind,
+        disablesTapTrustChecks: Bool
+    ) async throws {
+        let command = HomebrewInstallCommand(packageName: packageName, kind: kind)
         _ = try await brewJSON(
-            arguments: ["install", "--formula", packageName],
+            arguments: command.arguments,
             timeout: 60 * 60,
             allowsAdministratorAuthentication: true,
             disablesTapTrustChecks: disablesTapTrustChecks

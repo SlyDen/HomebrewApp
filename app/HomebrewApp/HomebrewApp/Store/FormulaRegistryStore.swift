@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Observable state for browsing and searching the public Homebrew formula registry.
+/// Observable state for browsing public formulae and packages from installed taps.
 @MainActor
 @Observable
 final class FormulaRegistryStore {
@@ -10,8 +10,8 @@ final class FormulaRegistryStore {
     /// Formulae fetched from the public Homebrew registry before local tap merging.
     private var registryFormulae: [FormulaRegistryFormula] = []
 
-    /// Formula names discovered from taps installed on this Mac.
-    private var tappedFormulae: [FormulaRegistryFormula] = []
+    /// Formulae and casks discovered from taps installed on this Mac.
+    private var tappedCatalogItems: [FormulaRegistryFormula] = []
 
     /// Complete searchable catalog from the public registry and installed taps.
     private(set) var formulae: [FormulaRegistryFormula] = []
@@ -69,17 +69,17 @@ final class FormulaRegistryStore {
         errorMessage = nil
     }
 
-    /// Replaces formula names supplied by installed taps and updates current search.
-    func setTappedFormulae(_ formulae: [FormulaRegistryFormula]) {
-        tappedFormulae = formulae
+    /// Replaces packages supplied by installed taps and updates current search.
+    func setTappedCatalogItems(_ packages: [FormulaRegistryFormula]) {
+        tappedCatalogItems = packages
         rebuildCatalog()
     }
 
-    /// Merges registry metadata with locally tapped formula names using full names as identity.
+    /// Merges public formula metadata with locally tapped packages using kind-qualified identity.
     private func rebuildCatalog() {
         var formulaeByID = Dictionary(uniqueKeysWithValues: registryFormulae.map { ($0.id, $0) })
-        for formula in tappedFormulae where formulaeByID[formula.id] == nil {
-            formulaeByID[formula.id] = formula
+        for package in tappedCatalogItems where formulaeByID[package.id] == nil {
+            formulaeByID[package.id] = package
         }
         formulae = formulaeByID.values.sorted {
             $0.fullName.localizedStandardCompare($1.fullName) == .orderedAscending

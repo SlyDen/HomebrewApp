@@ -3,7 +3,7 @@ import Testing
 @testable import HomebrewApp
 
 struct HomebrewTapTests {
-    @Test func decodesTapInfoAndBuildsSearchableFormulae() throws {
+    @Test func decodesTapInfoAndBuildsSearchablePackages() throws {
         let data = Data(
             """
             {
@@ -11,7 +11,8 @@ struct HomebrewTapTests {
               "installed": true,
               "official": false,
               "trusted": false,
-              "formula_names": ["darrylmorley/whatcable/whatcable"],
+              "formula_names": ["darrylmorley/whatcable/whatcable-cli"],
+              "cask_tokens": ["darrylmorley/whatcable/whatcable"],
               "remote": "https://github.com/darrylmorley/homebrew-whatcable"
             }
             """.utf8
@@ -21,10 +22,14 @@ struct HomebrewTapTests {
 
         #expect(tap.name == "darrylmorley/whatcable")
         #expect(tap.isInstalled)
-        #expect(tap.formulaNames == ["darrylmorley/whatcable/whatcable"])
-        #expect(tap.formulae.first?.name == "whatcable")
-        #expect(tap.formulae.first?.fullName == "darrylmorley/whatcable/whatcable")
-        #expect(tap.formulae.first?.registryPage == nil)
+        #expect(tap.formulaNames == ["darrylmorley/whatcable/whatcable-cli"])
+        #expect(tap.caskTokens == ["darrylmorley/whatcable/whatcable"])
+        #expect(tap.formulae.first?.kind == .formula)
+        #expect(tap.casks.first?.name == "whatcable")
+        #expect(tap.casks.first?.kind == .cask)
+        #expect(tap.casks.first?.fullName == "darrylmorley/whatcable/whatcable")
+        #expect(tap.casks.first?.registryPage == nil)
+        #expect(tap.packageCount == 2)
     }
 
     @Test func validatesCanonicalTapNames() {

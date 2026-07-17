@@ -57,11 +57,11 @@ struct FormulaRegistryStoreTests {
             service: StubFormulaRegistryService(formulae: FormulaRegistryFixtures.formulae)
         )
         await store.load()
-        store.selectedFormulaID = "ripgrep"
+        store.selectedFormulaID = "formula:ripgrep"
 
         store.searchText = "Postgres"
 
-        #expect(store.selectedFormulaID == "libpq")
+        #expect(store.selectedFormulaID == "formula:libpq")
         #expect(store.selectedFormula?.name == "libpq")
     }
 
@@ -76,21 +76,28 @@ struct FormulaRegistryStoreTests {
         #expect(store.searchResults.map(\.name) == ["git", "libpq", "ripgrep"])
     }
 
-    @Test func includesFormulaeFromInstalledTapsInSearch() async {
+    @Test func includesFormulaeAndCasksFromInstalledTapsInSearch() async {
         let store = FormulaRegistryStore(
             service: StubFormulaRegistryService(formulae: FormulaRegistryFixtures.formulae)
         )
-        store.setTappedFormulae(
+        store.setTappedCatalogItems(
             HomebrewTap(
                 name: "darrylmorley/whatcable",
-                formulaNames: ["darrylmorley/whatcable/whatcable"]
-            ).formulae
+                formulaNames: ["darrylmorley/whatcable/whatcable-cli"],
+                caskTokens: ["darrylmorley/whatcable/whatcable"]
+            ).catalogItems
         )
         await store.load()
 
         store.searchText = "whatcable"
 
-        #expect(store.searchResults.map(\.fullName) == ["darrylmorley/whatcable/whatcable"])
+        #expect(
+            store.searchResults.map(\.fullName) == [
+                "darrylmorley/whatcable/whatcable",
+                "darrylmorley/whatcable/whatcable-cli"
+            ]
+        )
+        #expect(store.searchResults.map(\.kind) == [.cask, .formula])
         #expect(store.selectedFormula?.tap == "darrylmorley/whatcable")
     }
 }

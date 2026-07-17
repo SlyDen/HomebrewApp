@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Sidebar containing registry search results and refresh controls.
+/// Sidebar containing catalog search results and refresh controls.
 struct FormulaRegistrySidebar: View {
     @Environment(\.appAppearancePreference) private var appearancePreference
     @Bindable var store: FormulaRegistryStore
@@ -10,32 +10,33 @@ struct FormulaRegistrySidebar: View {
 
     /// Search result list with loading, failure, and empty states.
     var body: some View {
-        List(store.searchResults, selection: $store.selectedFormulaID) { formula in
+        List(store.searchResults, selection: $store.selectedFormulaID) { package in
             FormulaRegistryRow(
-                name: formula.name,
-                fullName: formula.fullName,
-                tap: formula.tap,
-                summary: formula.summary,
-                stableVersion: formula.versions.stable,
-                isDeprecated: formula.isDeprecated,
-                isDisabled: formula.isDisabled,
+                name: package.name,
+                kind: package.kind,
+                fullName: package.fullName,
+                tap: package.tap,
+                summary: package.summary,
+                stableVersion: package.versions.stable,
+                isDeprecated: package.isDeprecated,
+                isDisabled: package.isDisabled,
                 isHomebrewProviderEnabled: isHomebrewProviderEnabled,
-                isInstalled: library.isFormulaInstalled(named: formula.name),
+                isInstalled: library.isPackageInstalled(named: package.name, kind: package.kind),
                 library: library
             )
-            .tag(formula.id)
+            .tag(package.id)
             .listRowBackground(appearancePreference.palette.sidebar.opacity(0.62))
         }
         .scrollContentBackground(.hidden)
         .background(appearancePreference.palette.sidebar)
-        .navigationTitle("Formula Registry")
-        .searchable(text: $store.searchText, prompt: "Search formulae")
+        .navigationTitle("Homebrew Catalog")
+        .searchable(text: $store.searchText, prompt: "Search formulae and casks")
         .overlay {
             if store.isLoading && store.formulae.isEmpty {
                 ContentUnavailableView {
-                    Label("Loading Formulae", systemImage: "arrow.down.circle")
+                    Label("Loading Catalog", systemImage: "arrow.down.circle")
                 } description: {
-                    Text("Fetching the current catalog from Homebrew.")
+                    Text("Fetching formulae and loading packages from installed taps.")
                 } actions: {
                     ProgressView()
                         .controlSize(.small)
@@ -52,9 +53,9 @@ struct FormulaRegistrySidebar: View {
                 }
             } else if store.searchResults.isEmpty && store.searchText.isEmpty == false {
                 ContentUnavailableView(
-                    "No Matching Formulae",
+                    "No Matching Packages",
                     systemImage: "magnifyingglass",
-                    description: Text("Try a formula name, alias, or description.")
+                    description: Text("Try a formula, cask, alias, tap, or description.")
                 )
             }
         }
@@ -69,7 +70,7 @@ struct FormulaRegistrySidebar: View {
                     Task {
                         await store.load(forceRefresh: true)
                         await library.refreshTaps()
-                        store.setTappedFormulae(library.tappedFormulae)
+                        store.setTappedCatalogItems(library.tappedCatalogItems)
                     }
                 }
                 .disabled(store.isLoading || library.isLoadingTaps)

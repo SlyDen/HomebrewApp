@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Interface for listing, adding, refreshing, and removing Homebrew formula taps.
+/// Interface for listing, adding, refreshing, and removing Homebrew taps.
 struct TapManagementView: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var library: PackageLibrary
@@ -27,7 +27,7 @@ struct TapManagementView: View {
                     onRemove: requestRemoval
                 )
             }
-            .navigationTitle("Formula Taps")
+            .navigationTitle("Homebrew Taps")
             .safeAreaInset(edge: .bottom) {
                 if library.isLoadingTaps || library.tapErrorMessage != nil {
                     TapStatusBar(
@@ -68,7 +68,7 @@ struct TapManagementView: View {
                 Task { await library.removeTap(tap) }
             }
         } message: { tap in
-            Text("This removes \(tap.name) and its \(tap.formulaNames.count) formulae from Homebrew search.")
+            Text("This removes \(tap.name) and its \(tap.packageCount) packages from Homebrew search.")
         }
     }
 

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Detail panel for one formula published by Homebrew.
+/// Detail panel for one formula or cask available through Homebrew.
 struct FormulaRegistryDetailView: View {
     @Environment(\.appAppearancePreference) private var appearancePreference
     let formula: FormulaRegistryFormula
@@ -13,6 +13,7 @@ struct FormulaRegistryDetailView: View {
             Section {
                 FormulaRegistryHeader(
                     name: formula.name,
+                    kind: formula.kind,
                     summary: formula.summary,
                     stableVersion: formula.versions.stable,
                     homepage: formula.homepage,
@@ -21,16 +22,18 @@ struct FormulaRegistryDetailView: View {
             }
 
             Section("Actions") {
-                FormulaInstallButton(
-                    formulaName: formula.fullName,
-                    isFormulaDisabled: formula.isDisabled,
+                RegistryInstallButton(
+                    packageName: formula.fullName,
+                    kind: formula.kind,
+                    isPackageDisabled: formula.isDisabled,
                     isHomebrewProviderEnabled: isHomebrewProviderEnabled,
-                    isInstalled: library.isFormulaInstalled(named: formula.name),
+                    isInstalled: library.isPackageInstalled(named: formula.name, kind: formula.kind),
                     library: library
                 )
             }
 
             FormulaAvailabilitySection(
+                kind: formula.kind,
                 isDeprecated: formula.isDeprecated,
                 isDisabled: formula.isDisabled,
                 hasBottle: formula.versions.hasBottle,
@@ -38,6 +41,7 @@ struct FormulaRegistryDetailView: View {
             )
 
             FormulaMetadataSection(
+                kind: formula.kind,
                 fullName: formula.fullName,
                 tap: formula.tap,
                 stableVersion: formula.versions.stable,

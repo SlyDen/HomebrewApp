@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One installed tap row with formula count, trust state, and removal action.
+/// One installed tap row with package counts, trust state, and removal action.
 struct TapRow: View {
     let tap: HomebrewTap
     let isBusy: Bool
@@ -13,7 +13,7 @@ struct TapRow: View {
                 Text(tap.name)
                     .font(.headline)
 
-                Text("\(tap.formulaNames.count) formulae")
+                Text("\(tap.formulaNames.count) formulae, \(tap.caskTokens.count) casks")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

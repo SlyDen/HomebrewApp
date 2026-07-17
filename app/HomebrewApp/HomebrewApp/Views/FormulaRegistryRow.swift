@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Compact formula metadata shown in one registry result row.
+/// Compact package metadata shown in one catalog result row.
 struct FormulaRegistryRow: View {
     let name: String
+    let kind: ManagedPackageKind
     let fullName: String
     let tap: String
     let summary: String?
@@ -53,15 +54,16 @@ struct FormulaRegistryRow: View {
                     }
                 }
             } icon: {
-                Image(systemName: "shippingbox")
+                Image(systemName: kind.systemImage)
                     .symbolRenderingMode(.hierarchical)
             }
 
             Spacer(minLength: 0)
 
-            FormulaInstallButton(
-                formulaName: fullName,
-                isFormulaDisabled: isDisabled,
+            RegistryInstallButton(
+                packageName: fullName,
+                kind: kind,
+                isPackageDisabled: isDisabled,
                 isHomebrewProviderEnabled: isHomebrewProviderEnabled,
                 isInstalled: isInstalled,
                 library: library
