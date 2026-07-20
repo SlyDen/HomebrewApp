@@ -10,7 +10,8 @@ enum AppPreferenceKeys {
 
 /// Xcode-style app settings window with toolbar tabs for preference groups.
 struct AppSettingsView: View {
-    @AppStorage(AppPreferenceKeys.appearancePreference) private var appearancePreferenceRawValue = AppearancePreference.system.rawValue
+    @AppStorage(AppPreferenceKeys.appearancePreference)
+    private var appearancePreferenceRawValue = AppearancePreference.system.rawValue
     @AppStorage(AppPreferenceKeys.isHomebrewProviderEnabled) private var isHomebrewProviderEnabled = true
     @AppStorage(AppPreferenceKeys.cleanupAfterUpgrade) private var cleanupAfterUpgrade = true
     @AppStorage(AppPreferenceKeys.disablesTapTrustChecks) private var disablesTapTrustChecks = false
@@ -111,7 +112,10 @@ private struct ThemeOptionButton: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay {
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(isSelected ? Color.accentColor : .secondary.opacity(0.28), lineWidth: isSelected ? 3 : 1)
+                            .strokeBorder(
+                                isSelected ? Color.accentColor : .secondary.opacity(0.28),
+                                lineWidth: isSelected ? 3 : 1
+                            )
                     }
                     .shadow(color: .black.opacity(isSelected ? 0.18 : 0.08), radius: isSelected ? 5 : 2, y: 1)
                     .overlay(alignment: .bottomTrailing) {
@@ -224,7 +228,10 @@ private struct ProvidersSettingsPane: View {
                 Toggle(isOn: $disablesTapTrustChecks) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Disable tap trust checks")
-                        Text("Set HOMEBREW_NO_REQUIRE_TAP_TRUST=1 for commands launched by this app. Homebrew does not recommend this override and plans to remove it.")
+                        Text(
+                            "Set HOMEBREW_NO_REQUIRE_TAP_TRUST=1 for commands launched by this app. "
+                                + "Homebrew does not recommend this override and plans to remove it."
+                        )
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

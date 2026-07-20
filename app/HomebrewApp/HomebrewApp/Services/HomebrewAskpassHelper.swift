@@ -30,7 +30,9 @@ struct HomebrewAskpassHelper {
         on run argv
             set promptText to "Homebrew needs administrator access."
             if (count of argv) > 0 then set promptText to item 1 of argv
-            set dialogResult to display dialog promptText default answer "" with hidden answer buttons {"Cancel", "Authenticate"} default button "Authenticate" cancel button "Cancel" with title "HomebrewApp Administrator Access" with icon caution
+            set dialogResult to display dialog promptText default answer "" with hidden answer ¬
+                buttons {"Cancel", "Authenticate"} default button "Authenticate" ¬
+                cancel button "Cancel" with title "HomebrewApp Administrator Access" with icon caution
             return text returned of dialogResult
         end run
         APPLESCRIPT

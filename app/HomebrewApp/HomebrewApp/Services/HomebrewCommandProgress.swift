@@ -3,6 +3,44 @@ import Foundation
 /// Main-actor callback used to publish concise progress from a Homebrew command.
 typealias HomebrewProgressHandler = @MainActor @Sendable (String) -> Void
 
+/// Serializes progress callbacks and exposes a completion point for process shutdown.
+///
+/// Pipe callbacks can arrive on different threads. Chaining each delivery behind the
+/// previous task preserves the order in which parsed messages reach this object, while
+/// `finish()` lets the process runner wait until the main actor has applied them all.
+nonisolated final class HomebrewProgressDelivery: @unchecked Sendable {
+    private let lock = NSLock()
+    private let progress: HomebrewProgressHandler
+    private var pendingDelivery: Task<Void, Never>?
+
+    /// Creates a delivery queue for one command's progress callback.
+    init(progress: @escaping HomebrewProgressHandler) {
+        self.progress = progress
+    }
+
+    /// Adds parsed messages to the ordered main-actor delivery chain.
+    func publish(_ messages: [String]) {
+        guard messages.isEmpty == false else { return }
+
+        lock.withLock {
+            let previousDelivery = pendingDelivery
+            let progress = self.progress
+            pendingDelivery = Task {
+                await previousDelivery?.value
+                for message in messages {
+                    await progress(message)
+                }
+            }
+        }
+    }
+
+    /// Waits until every message published so far has reached the progress callback.
+    func finish() async {
+        let finalDelivery = lock.withLock { pendingDelivery }
+        await finalDelivery?.value
+    }
+}
+
 /// Converts streamed Homebrew output into complete lines before parsing it.
 ///
 /// `FileHandle` readability callbacks are not actor-isolated. All mutable buffer
@@ -11,11 +49,16 @@ typealias HomebrewProgressHandler = @MainActor @Sendable (String) -> Void
 nonisolated final class HomebrewProcessOutputObserver: @unchecked Sendable {
     private let lock = NSLock()
     private var bufferedData = Data()
-    private let progress: HomebrewProgressHandler
+    private let delivery: HomebrewProgressDelivery
 
     /// Creates an observer that reports parsed progress on the main actor.
     init(progress: @escaping HomebrewProgressHandler) {
-        self.progress = progress
+        delivery = HomebrewProgressDelivery(progress: progress)
+    }
+
+    /// Creates an observer that shares an ordered delivery queue with another pipe.
+    init(delivery: HomebrewProgressDelivery) {
+        self.delivery = delivery
     }
 
     /// Accepts an arbitrary stdout or stderr chunk.
@@ -33,7 +76,7 @@ nonisolated final class HomebrewProcessOutputObserver: @unchecked Sendable {
     /// Publishes any final unterminated line after the process exits.
     func finish() {
         lock.lock()
-        let finalLine = bufferedData.isEmpty ? nil : String(decoding: bufferedData, as: UTF8.self)
+        let finalLine = bufferedData.isEmpty ? nil : String(bytes: bufferedData, encoding: .utf8)
         bufferedData.removeAll(keepingCapacity: false)
         lock.unlock()
 
@@ -48,7 +91,9 @@ nonisolated final class HomebrewProcessOutputObserver: @unchecked Sendable {
 
         while let newlineIndex = bufferedData.firstIndex(of: 0x0A) {
             let lineData = bufferedData[..<newlineIndex]
-            lines.append(String(decoding: lineData, as: UTF8.self))
+            if let line = String(bytes: lineData, encoding: .utf8) {
+                lines.append(line)
+            }
             bufferedData.removeSubrange(...newlineIndex)
         }
 
@@ -57,12 +102,8 @@ nonisolated final class HomebrewProcessOutputObserver: @unchecked Sendable {
 
     /// Parses lines and delivers meaningful changes to observable state.
     private func publish(_ lines: [String]) {
-        for line in lines {
-            guard let message = HomebrewOutputParser.progressMessage(from: line) else { continue }
-            Task { @MainActor [progress] in
-                progress(message)
-            }
-        }
+        let messages = lines.compactMap(HomebrewOutputParser.progressMessage(from:))
+        delivery.publish(messages)
     }
 }
 

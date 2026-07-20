@@ -171,14 +171,21 @@ private struct VersionRow: View {
 
             Menu {
                 Button {
-                    Task { await library.perform(.makeActive, package: package, version: version, context: modelContext) }
+                    Task {
+                        await library.perform(.makeActive, package: package, version: version, context: modelContext)
+                    }
                 } label: {
-                    Label(PackageVersionAction.makeActive.title, systemImage: PackageVersionAction.makeActive.systemImage)
+                    Label(
+                        PackageVersionAction.makeActive.title,
+                        systemImage: PackageVersionAction.makeActive.systemImage
+                    )
                 }
                 .disabled(version.isActive || library.isLoading)
 
                 Button {
-                    Task { await library.perform(.update, package: package, version: version, context: modelContext) }
+                    Task {
+                        await library.perform(.update, package: package, version: version, context: modelContext)
+                    }
                 } label: {
                     Label(PackageVersionAction.update.title, systemImage: PackageVersionAction.update.systemImage)
                 }

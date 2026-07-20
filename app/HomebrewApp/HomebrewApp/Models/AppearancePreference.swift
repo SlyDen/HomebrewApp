@@ -36,7 +36,9 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
         .coralReef,
         .emerald
     ]
+}
 
+extension AppearancePreference {
     /// SwiftUI color scheme override for platforms that use SwiftUI's environment directly.
     var colorScheme: ColorScheme? {
         switch self {

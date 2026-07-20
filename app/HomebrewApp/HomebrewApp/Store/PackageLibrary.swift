@@ -2,6 +2,9 @@ import Foundation
 import Observation
 import SwiftData
 
+// Observable state, package operations, persistence, and tap workflows share actor-isolated state.
+// swiftlint:disable file_length
+
 /// Main observable state container for the package browser.
 ///
 /// `PackageLibrary` coordinates three responsibilities:
@@ -225,8 +228,14 @@ final class PackageLibrary {
         appendLog(.command, "Executing command", detail: "brew info --json=v2 --installed")
 
         do {
-            let livePackages = try await service.installedPackages(disablesTapTrustChecks: disablesTapTrustChecks)
-            appendLog(.success, "Fetched package list", detail: "Homebrew returned \(livePackages.count) installed packages.")
+            let livePackages = try await service.installedPackages(
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+            appendLog(
+                .success,
+                "Fetched package list",
+                detail: "Homebrew returned \(livePackages.count) installed packages."
+            )
             try upsert(livePackages, in: context)
             packages = livePackages.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             repairSelection()
@@ -239,7 +248,11 @@ final class PackageLibrary {
         isLoading = false
         appendLog(.state, "Idle", detail: "No package operation is currently running.")
     }
+}
 
+extension PackageLibrary {
+    // The method deliberately reads as the ordered update, upgrade, cleanup, and refresh workflow.
+    // swiftlint:disable function_body_length
     /// Upgrades every outdated Homebrew package, optionally performs a full
     /// cleanup, and refreshes the package cache afterward.
     ///
@@ -259,7 +272,11 @@ final class PackageLibrary {
         isLoading = true
         errorMessage = nil
         currentCommandProgress = "Updating Homebrew metadata"
-        appendLog(.state, "Updating Homebrew", detail: "Fetching the latest Homebrew and formula metadata before upgrading.")
+        appendLog(
+            .state,
+            "Updating Homebrew",
+            detail: "Fetching the latest Homebrew and formula metadata before upgrading."
+        )
         appendLog(.command, "Executing command", detail: "brew update")
 
         do {
@@ -325,6 +342,7 @@ final class PackageLibrary {
             errorMessage = cleanupErrorMessage
         }
     }
+    // swiftlint:enable function_body_length
 
     /// Performs a package-level action through the service and refreshes state.
     ///
@@ -343,31 +361,7 @@ final class PackageLibrary {
         appendLog(.command, "Executing command", detail: command(for: action, package: package))
 
         do {
-            switch action {
-            case .upgrade:
-                try await service.update(
-                    packageName: package.name,
-                    version: nil,
-                    disablesTapTrustChecks: disablesTapTrustChecks
-                )
-            case .reinstall:
-                try await service.reinstall(
-                    packageName: package.name,
-                    force: false,
-                    disablesTapTrustChecks: disablesTapTrustChecks
-                )
-            case .forceReinstall:
-                try await service.reinstall(
-                    packageName: package.name,
-                    force: true,
-                    disablesTapTrustChecks: disablesTapTrustChecks
-                )
-            case .delete:
-                try await service.delete(
-                    packageName: package.name,
-                    disablesTapTrustChecks: disablesTapTrustChecks
-                )
-            }
+            try await execute(action, package: package)
             if action == .upgrade {
                 upgradeResults[package.id] = PackageUpgradeResult(status: .succeeded)
                 repairSelectionIfUpgradeFilterIsActive()
@@ -396,37 +390,31 @@ final class PackageLibrary {
     ///   - package: Package that owns the selected version.
     ///   - version: Version selected by the user.
     ///   - context: SwiftData model context used by the follow-up refresh.
-    func perform(_ action: PackageVersionAction, package: InstalledPackageDTO, version: InstalledVersionDTO, context: ModelContext) async {
+    func perform(
+        _ action: PackageVersionAction,
+        package: InstalledPackageDTO,
+        version: InstalledVersionDTO,
+        context: ModelContext
+    ) async {
         if action == .update {
             upgradeResults = [:]
             repairSelectionIfUpgradeFilterIsActive()
         }
         isLoading = true
         errorMessage = nil
-        appendLog(.state, "Starting \(action.title.lowercased())", detail: "Package: \(package.name), version: \(version.version)")
-        appendLog(.command, "Executing command", detail: command(for: action, package: package, version: version))
+        appendLog(
+            .state,
+            "Starting \(action.title.lowercased())",
+            detail: "Package: \(package.name), version: \(version.version)"
+        )
+        appendLog(
+            .command,
+            "Executing command",
+            detail: command(for: action, package: package, version: version)
+        )
 
         do {
-            switch action {
-            case .delete:
-                try await service.deleteVersion(
-                    packageName: package.name,
-                    version: version.version,
-                    disablesTapTrustChecks: disablesTapTrustChecks
-                )
-            case .makeActive:
-                try await service.makeVersionActive(
-                    packageName: package.name,
-                    version: version.version,
-                    disablesTapTrustChecks: disablesTapTrustChecks
-                )
-            case .update:
-                try await service.update(
-                    packageName: package.name,
-                    version: version.version,
-                    disablesTapTrustChecks: disablesTapTrustChecks
-                )
-            }
+            try await execute(action, package: package, version: version)
             if action == .update {
                 upgradeResults[package.id] = PackageUpgradeResult(status: .succeeded)
                 repairSelectionIfUpgradeFilterIsActive()
@@ -523,7 +511,7 @@ final class PackageLibrary {
         }
 
         guard message.hasPrefix("Error:") else { return }
-        let failedPackageID = activeBulkUpgradePackageID ?? packageID(mentionedIn: message)
+        let failedPackageID = packageID(mentionedIn: message) ?? activeBulkUpgradePackageID
         if let failedPackageID {
             bulkUpgradePackageIDs.insert(failedPackageID)
             bulkUpgradeFailureMessages[failedPackageID] = message
@@ -591,7 +579,11 @@ final class PackageLibrary {
     ///   - incomingPackages: Live snapshots returned by the package service.
     ///   - context: SwiftData model context to mutate and save.
     private func upsert(_ incomingPackages: [InstalledPackageDTO], in context: ModelContext) throws {
-        appendLog(.state, "Updating local cache", detail: "Writing \(incomingPackages.count) package snapshots to SwiftData.")
+        appendLog(
+            .state,
+            "Updating local cache",
+            detail: "Writing \(incomingPackages.count) package snapshots to SwiftData."
+        )
         let existing = try context.fetch(FetchDescriptor<BrewPackage>())
         var existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
         let incomingIDs = Set(incomingPackages.map(\.id))
@@ -608,7 +600,13 @@ final class PackageLibrary {
                     homepage: package.homepage,
                     installedOn: package.installedOn,
                     installedSize: package.installedSize,
-                    versions: package.installedVersions.map { BrewVersion(version: $0.version, isActive: $0.isActive, installedOn: $0.installedOn) }
+                    versions: package.installedVersions.map {
+                        BrewVersion(
+                            version: $0.version,
+                            isActive: $0.isActive,
+                            installedOn: $0.installedOn
+                        )
+                    }
                 )
                 context.insert(storedPackage)
                 existingByID[package.id] = storedPackage
@@ -638,7 +636,11 @@ final class PackageLibrary {
     }
 
     /// User-facing command string for a version-level action.
-    private func command(for action: PackageVersionAction, package: InstalledPackageDTO, version: InstalledVersionDTO) -> String {
+    private func command(
+        for action: PackageVersionAction,
+        package: InstalledPackageDTO,
+        version: InstalledVersionDTO
+    ) -> String {
         switch action {
         case .delete:
             "brew uninstall \(package.name)@\(version.version)"
@@ -646,6 +648,63 @@ final class PackageLibrary {
             "brew link --overwrite \(package.name)@\(version.version)"
         case .update:
             "brew upgrade \(package.name)"
+        }
+    }
+
+    /// Executes a package-level action using the shared Homebrew service.
+    private func execute(_ action: PackageAction, package: InstalledPackageDTO) async throws {
+        switch action {
+        case .upgrade:
+            try await service.update(
+                packageName: package.name,
+                version: nil,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+        case .reinstall:
+            try await service.reinstall(
+                packageName: package.name,
+                force: false,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+        case .forceReinstall:
+            try await service.reinstall(
+                packageName: package.name,
+                force: true,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+        case .delete:
+            try await service.delete(
+                packageName: package.name,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+        }
+    }
+
+    /// Executes a version-level action using the shared Homebrew service.
+    private func execute(
+        _ action: PackageVersionAction,
+        package: InstalledPackageDTO,
+        version: InstalledVersionDTO
+    ) async throws {
+        switch action {
+        case .delete:
+            try await service.deleteVersion(
+                packageName: package.name,
+                version: version.version,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+        case .makeActive:
+            try await service.makeVersionActive(
+                packageName: package.name,
+                version: version.version,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
+        case .update:
+            try await service.update(
+                packageName: package.name,
+                version: version.version,
+                disablesTapTrustChecks: disablesTapTrustChecks
+            )
         }
     }
 

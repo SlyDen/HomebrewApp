@@ -2,6 +2,9 @@ import SwiftData
 import SwiftUI
 import UniformTypeIdentifiers
 
+// The package browser and its tightly coupled console components share previews and private styling.
+// swiftlint:disable file_length
+
 /// Main browser view showing installed packages.
 ///
 /// The view displays cached packages immediately, refreshes from Homebrew when no
@@ -91,7 +94,10 @@ struct PackageListView: View {
                     Button {
                         library.isLogPanelPresented.toggle()
                     } label: {
-                        Label(library.isLogPanelPresented ? "Hide Logs" : "Show Logs", systemImage: library.isLogPanelPresented ? "rectangle.bottomthird.inset.filled" : "rectangle.bottomthird.inset.filled")
+                        Label(
+                            library.isLogPanelPresented ? "Hide Logs" : "Show Logs",
+                            systemImage: "rectangle.bottomthird.inset.filled"
+                        )
                     }
 
                     Button {
@@ -273,7 +279,11 @@ private struct PackageLogPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
                         if library.logs.isEmpty {
-                            ContentUnavailableView("No Logs", systemImage: "terminal", description: Text("Package activity will appear here."))
+                            ContentUnavailableView(
+                                "No Logs",
+                                systemImage: "terminal",
+                                description: Text("Package activity will appear here.")
+                            )
                                 .frame(maxWidth: .infinity, minHeight: 150)
                         } else {
                             ForEach(library.logs) { entry in

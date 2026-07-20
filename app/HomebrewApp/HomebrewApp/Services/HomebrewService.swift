@@ -1,5 +1,8 @@
 import Foundation
 
+// Service protocol, mock, CLI bridge, and private decoding models form one command boundary.
+// swiftlint:disable file_length
+
 /// Service contract for loading and mutating installed packages.
 ///
 /// The UI depends on this package-manager-shaped interface rather than directly
@@ -105,7 +108,8 @@ enum HomebrewServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedPlatform:
-            "Homebrew CLI access is not available from this iOS app. Connect a macOS helper to refresh live package data."
+            "Homebrew CLI access is not available from this iOS app. "
+                + "Connect a macOS helper to refresh live package data."
         case .commandFailed(let executablePath, let arguments, let message):
             "\(executablePath) \(arguments.joined(separator: " ")) failed: \(message)"
         case .commandTimedOut(let executablePath, let arguments, let seconds):
@@ -141,8 +145,16 @@ struct MockHomebrewService: HomebrewServicing {
                 summary: "Distributed revision control system",
                 homepage: URL(string: "https://git-scm.com"),
                 installedVersions: [
-                    InstalledVersionDTO(version: "2.50.1", isActive: true, installedOn: now.addingTimeInterval(-86_400 * 2)),
-                    InstalledVersionDTO(version: "2.49.0", isActive: false, installedOn: now.addingTimeInterval(-86_400 * 28))
+                    InstalledVersionDTO(
+                        version: "2.50.1",
+                        isActive: true,
+                        installedOn: now.addingTimeInterval(-86_400 * 2)
+                    ),
+                    InstalledVersionDTO(
+                        version: "2.49.0",
+                        isActive: false,
+                        installedOn: now.addingTimeInterval(-86_400 * 28)
+                    )
                 ],
                 installedOn: now.addingTimeInterval(-86_400 * 28)
             ),
@@ -152,7 +164,11 @@ struct MockHomebrewService: HomebrewServicing {
                 summary: "Object-relational database system",
                 homepage: URL(string: "https://www.postgresql.org"),
                 installedVersions: [
-                    InstalledVersionDTO(version: "17.5", isActive: true, installedOn: now.addingTimeInterval(-86_400 * 7))
+                    InstalledVersionDTO(
+                        version: "17.5",
+                        isActive: true,
+                        installedOn: now.addingTimeInterval(-86_400 * 7)
+                    )
                 ],
                 installedOn: now.addingTimeInterval(-86_400 * 7)
             ),
@@ -162,7 +178,11 @@ struct MockHomebrewService: HomebrewServicing {
                 summary: "Open-source code editor",
                 homepage: URL(string: "https://code.visualstudio.com"),
                 installedVersions: [
-                    InstalledVersionDTO(version: "1.102.0", isActive: true, installedOn: now.addingTimeInterval(-86_400))
+                    InstalledVersionDTO(
+                        version: "1.102.0",
+                        isActive: true,
+                        installedOn: now.addingTimeInterval(-86_400)
+                    )
                 ],
                 installedOn: now.addingTimeInterval(-86_400)
             )
@@ -338,7 +358,9 @@ struct HomebrewCLIService: HomebrewServicing {
             disablesTapTrustChecks: disablesTapTrustChecks
         )
     }
+}
 
+extension HomebrewCLIService {
     /// Measures package directories without failing the main package refresh when
     /// disk-usage metadata is unavailable.
     private func installedPackageSizes(
@@ -402,6 +424,8 @@ struct HomebrewCLIService: HomebrewServicing {
         )
     }
 
+    // Process launch, streaming, termination, and timeout setup must remain in one lexical scope.
+    // swiftlint:disable function_body_length
     /// Launches an executable and streams stdout/stderr until it exits.
     ///
     /// `brew info --json=v2 --installed` can emit enough JSON to fill a pipe. The
@@ -457,8 +481,9 @@ struct HomebrewCLIService: HomebrewServicing {
             let outputBuffer = ProcessOutputBuffer()
             let errorBuffer = ProcessOutputBuffer()
             let completion = ProcessCompletion(continuation)
-            let outputObserver = progress.map { HomebrewProcessOutputObserver(progress: $0) }
-            let errorObserver = progress.map { HomebrewProcessOutputObserver(progress: $0) }
+            let progressDelivery = progress.map { HomebrewProgressDelivery(progress: $0) }
+            let outputObserver = progressDelivery.map { HomebrewProcessOutputObserver(delivery: $0) }
+            let errorObserver = progressDelivery.map { HomebrewProcessOutputObserver(delivery: $0) }
 
             output.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
@@ -485,20 +510,22 @@ struct HomebrewCLIService: HomebrewServicing {
                 outputObserver?.finish()
                 errorObserver?.finish()
 
+                let result: Result<Data, any Error>
                 if process.terminationStatus == 0 {
-                    completion.finish(.success(outputBuffer.data))
+                    result = .success(outputBuffer.data)
                 } else {
-                    let message = String(data: errorBuffer.data, encoding: .utf8) ?? "process exited with status \(process.terminationStatus)"
-                    completion.finish(
-                        .failure(
-                            HomebrewServiceError.commandFailed(
-                                executablePath: displayPath,
-                                arguments: displayArguments,
-                                message: message.trimmingCharacters(in: .whitespacesAndNewlines)
-                            )
+                    let message = String(data: errorBuffer.data, encoding: .utf8)
+                        ?? "process exited with status \(process.terminationStatus)"
+                    result = .failure(
+                        HomebrewServiceError.commandFailed(
+                            executablePath: displayPath,
+                            arguments: displayArguments,
+                            message: message.trimmingCharacters(in: .whitespacesAndNewlines)
                         )
                     )
                 }
+
+                completion.finish(result, after: progressDelivery)
             }
 
             do {
@@ -526,11 +553,13 @@ struct HomebrewCLIService: HomebrewServicing {
                             arguments: displayArguments,
                             seconds: timeout
                         )
-                    )
+                    ),
+                    after: progressDelivery
                 )
             }
         }
     }
+    // swiftlint:enable function_body_length
 
     /// PATH supplied to the launched shell before it reads user startup files.
     ///
@@ -599,13 +628,43 @@ nonisolated private final class ProcessCompletion: @unchecked Sendable {
 
     /// Completes the continuation if it has not already been resumed.
     func finish(_ result: Result<Data, any Error>) {
-        lock.lock()
-        let continuation = continuation
-        self.continuation = nil
-        lock.unlock()
+        let continuation = takeContinuation()
+        guard let continuation else { return }
+        resume(continuation, with: result)
+    }
 
+    /// Completes only after the command's final progress callback reaches the UI.
+    func finish(
+        _ result: Result<Data, any Error>,
+        after progressDelivery: HomebrewProgressDelivery?
+    ) {
+        let continuation = takeContinuation()
         guard let continuation else { return }
 
+        guard let progressDelivery else {
+            resume(continuation, with: result)
+            return
+        }
+
+        Task {
+            await progressDelivery.finish()
+            resume(continuation, with: result)
+        }
+    }
+
+    /// Atomically reserves the continuation for the first completion callback.
+    private func takeContinuation() -> CheckedContinuation<Data, any Error>? {
+        lock.withLock {
+            defer { continuation = nil }
+            return continuation
+        }
+    }
+
+    /// Applies a stored result to its reserved continuation.
+    private func resume(
+        _ continuation: CheckedContinuation<Data, any Error>,
+        with result: Result<Data, any Error>
+    ) {
         switch result {
         case .success(let data):
             continuation.resume(returning: data)
@@ -689,7 +748,13 @@ private struct BrewCask: Decodable {
             kind: kind,
             summary: desc ?? "No description available",
             homepage: homepage,
-            installedVersions: [InstalledVersionDTO(version: installed ?? "installed", isActive: true, installedOn: date)],
+            installedVersions: [
+                InstalledVersionDTO(
+                    version: installed ?? "installed",
+                    isActive: true,
+                    installedOn: date
+                )
+            ],
             installedOn: date
         )
     }
