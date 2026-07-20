@@ -19,6 +19,8 @@ Package-level actions include:
 
 The Packages menu and package-list toolbar also provide **Upgrade All Packages**. The workflow always runs `brew update` first so Homebrew and formula metadata are current. Only after that mandatory step succeeds does the app run `brew upgrade --no-ask` with no package arguments, upgrading every outdated, unpinned formula and cask. When the cleanup preference is enabled, the app follows a successful upgrade with `brew cleanup` before refreshing the package list.
 
+As Homebrew moves between packages, the list records a green check for completed upgrades. If the command fails while handling a package, that row receives a red error icon and tint with the Homebrew failure available as a tooltip. These results describe the latest upgrade operation in the current app session and remain visible after the package refresh.
+
 Version-level actions include:
 
 - Make Active

@@ -19,22 +19,45 @@ final class PackageLibrary {
     private let maximumLogCount = 500
 
     /// Current in-memory package snapshots rendered by the UI.
-    var packages: [InstalledPackageDTO] = []
+    var packages: [InstalledPackageDTO] = [] {
+        didSet { recomputeFilteredPackages() }
+    }
 
     /// Navigation identity for the selected package detail screen.
     var selectedPackageID: InstalledPackageDTO.ID?
 
     /// User-entered search text applied to package names and summaries.
-    var searchText = ""
+    var searchText = "" {
+        didSet { recomputeFilteredPackages() }
+    }
 
     /// Optional package-kind filter selected from the toolbar menu.
-    var selectedKind: ManagedPackageKind?
+    var selectedKind: ManagedPackageKind? {
+        didSet { recomputeFilteredPackages() }
+    }
 
     /// Ordering applied to the installed package sidebar.
-    var sortOption: PackageSortOption = .name
+    var sortOption: PackageSortOption = .name {
+        didSet { recomputeFilteredPackages() }
+    }
 
     /// Whether the list should only show packages with more than one installed version.
-    var showsOnlyMultipleVersions = false
+    var showsOnlyMultipleVersions = false {
+        didSet { recomputeFilteredPackages() }
+    }
+
+    /// Optional result filter for the latest package upgrade operation.
+    var selectedUpgradeStatus: PackageUpgradeStatus? {
+        didSet { recomputeFilteredPackages() }
+    }
+
+    /// Per-package results from the latest upgrade operation in this app session.
+    private(set) var upgradeResults: [InstalledPackageDTO.ID: PackageUpgradeResult] = [:] {
+        didSet { recomputeFilteredPackages() }
+    }
+
+    /// Packages prepared for display after applying every active filter and sort.
+    private(set) var filteredPackages: [InstalledPackageDTO] = []
 
     /// Whether a refresh or package action is currently in progress.
     var isLoading = false
@@ -75,6 +98,15 @@ final class PackageLibrary {
     /// Identifies the command whose streamed callbacks may update live progress.
     @ObservationIgnored private var activeProgressSessionID: UUID?
 
+    /// Package currently being handled by the active bulk upgrade command.
+    @ObservationIgnored private var activeBulkUpgradePackageID: InstalledPackageDTO.ID?
+
+    /// Packages mentioned in the active bulk-upgrade output.
+    @ObservationIgnored private var bulkUpgradePackageIDs: Set<InstalledPackageDTO.ID> = []
+
+    /// Package-specific errors detected while the bulk command continues running.
+    @ObservationIgnored private var bulkUpgradeFailureMessages: [InstalledPackageDTO.ID: String] = [:]
+
     /// Creates a package library backed by the supplied service.
     ///
     /// - Parameter service: Optional service override for previews and tests. When
@@ -84,25 +116,28 @@ final class PackageLibrary {
         appendLog(.info, "Package library ready", detail: "Waiting for cache load or refresh.")
     }
 
-    /// Packages after applying the selected kind, version-count, and search filters.
-    var filteredPackages: [InstalledPackageDTO] {
-        let matchingPackages = packages.filter { package in
-            let matchesKind = selectedKind == nil || package.kind == selectedKind
-            let matchesVersionCount = !showsOnlyMultipleVersions || package.installedVersions.count > 1
-            let matchesSearch = searchText.isEmpty
-                || package.name.localizedStandardContains(searchText)
-                || package.summary.localizedCaseInsensitiveContains(searchText)
-            return matchesKind && matchesVersionCount && matchesSearch
-        }
-        return sortOption.sorted(matchingPackages)
-    }
-
     /// The currently selected package, if it is still present in the latest data.
     var selectedPackage: InstalledPackageDTO? {
         guard let selectedPackageID else { return filteredPackages.first }
         return packages.first { $0.id == selectedPackageID }
     }
 
+    /// Number of package-list filters currently narrowing the visible rows.
+    var activeFilterCount: Int {
+        (selectedKind == nil ? 0 : 1)
+            + (showsOnlyMultipleVersions ? 1 : 0)
+            + (selectedUpgradeStatus == nil ? 0 : 1)
+    }
+
+    /// Clears package kind, version-count, and latest-upgrade result filters.
+    func clearPackageFilters() {
+        selectedKind = nil
+        showsOnlyMultipleVersions = false
+        selectedUpgradeStatus = nil
+        repairSelection()
+    }
+
+    /// Returns whether Homebrew currently reports the named formula as installed.
     /// Returns whether Homebrew currently reports the named package as installed.
     ///
     /// - Parameters:
@@ -216,6 +251,11 @@ final class PackageLibrary {
     ///   - cleanupAfterUpgrade: Whether to run `brew cleanup` after upgrading.
     ///   - context: SwiftData model context used by the follow-up refresh.
     func upgradeAll(cleanupAfterUpgrade: Bool, from context: ModelContext) async {
+        upgradeResults = [:]
+        repairSelectionIfUpgradeFilterIsActive()
+        activeBulkUpgradePackageID = nil
+        bulkUpgradePackageIDs = []
+        bulkUpgradeFailureMessages = [:]
         isLoading = true
         errorMessage = nil
         currentCommandProgress = "Updating Homebrew metadata"
@@ -245,11 +285,14 @@ final class PackageLibrary {
             try await service.upgradeAll(disablesTapTrustChecks: disablesTapTrustChecks) { [weak self] message in
                 guard let self, activeProgressSessionID == progressSessionID else { return }
                 currentCommandProgress = message
+                recordBulkUpgradeProgress(message)
             }
             activeProgressSessionID = nil
+            finalizeBulkUpgradeResults()
             appendLog(.success, "Upgrade all completed", detail: "All available package upgrades finished.")
         } catch {
             activeProgressSessionID = nil
+            finalizeBulkUpgradeResults(overallErrorMessage: error.localizedDescription)
             currentCommandProgress = nil
             errorMessage = error.localizedDescription
             appendLog(.error, "Upgrade all failed", detail: error.localizedDescription)
@@ -290,6 +333,10 @@ final class PackageLibrary {
     ///   - package: Package that should receive the action.
     ///   - context: SwiftData model context used by the follow-up refresh.
     func perform(_ action: PackageAction, package: InstalledPackageDTO, context: ModelContext) async {
+        if action == .upgrade {
+            upgradeResults = [:]
+            repairSelectionIfUpgradeFilterIsActive()
+        }
         isLoading = true
         errorMessage = nil
         appendLog(.state, "Starting \(action.title.lowercased())", detail: "Package: \(package.name)")
@@ -321,9 +368,20 @@ final class PackageLibrary {
                     disablesTapTrustChecks: disablesTapTrustChecks
                 )
             }
+            if action == .upgrade {
+                upgradeResults[package.id] = PackageUpgradeResult(status: .succeeded)
+                repairSelectionIfUpgradeFilterIsActive()
+            }
             appendLog(.success, "\(action.title) completed", detail: "Refreshing package list after \(package.name).")
             await refresh(from: context)
         } catch {
+            if action == .upgrade {
+                upgradeResults[package.id] = PackageUpgradeResult(
+                    status: .failed,
+                    message: error.localizedDescription
+                )
+                repairSelectionIfUpgradeFilterIsActive()
+            }
             errorMessage = error.localizedDescription
             appendLog(.error, "\(action.title) failed", detail: error.localizedDescription)
         }
@@ -339,6 +397,10 @@ final class PackageLibrary {
     ///   - version: Version selected by the user.
     ///   - context: SwiftData model context used by the follow-up refresh.
     func perform(_ action: PackageVersionAction, package: InstalledPackageDTO, version: InstalledVersionDTO, context: ModelContext) async {
+        if action == .update {
+            upgradeResults = [:]
+            repairSelectionIfUpgradeFilterIsActive()
+        }
         isLoading = true
         errorMessage = nil
         appendLog(.state, "Starting \(action.title.lowercased())", detail: "Package: \(package.name), version: \(version.version)")
@@ -365,9 +427,24 @@ final class PackageLibrary {
                     disablesTapTrustChecks: disablesTapTrustChecks
                 )
             }
-            appendLog(.success, "\(action.title) completed", detail: "Refreshing package list after \(package.name) \(version.version).")
+            if action == .update {
+                upgradeResults[package.id] = PackageUpgradeResult(status: .succeeded)
+                repairSelectionIfUpgradeFilterIsActive()
+            }
+            appendLog(
+                .success,
+                "\(action.title) completed",
+                detail: "Refreshing package list after \(package.name) \(version.version)."
+            )
             await refresh(from: context)
         } catch {
+            if action == .update {
+                upgradeResults[package.id] = PackageUpgradeResult(
+                    status: .failed,
+                    message: error.localizedDescription
+                )
+                repairSelectionIfUpgradeFilterIsActive()
+            }
             errorMessage = error.localizedDescription
             appendLog(.error, "\(action.title) failed", detail: error.localizedDescription)
         }
@@ -420,6 +497,89 @@ final class PackageLibrary {
         if logs.count > maximumLogCount {
             logs.removeFirst(logs.count - maximumLogCount)
         }
+    }
+
+    /// Rebuilds the display collection when package or filter state changes.
+    private func recomputeFilteredPackages() {
+        let matchingPackages = packages.filter { package in
+            let matchesKind = selectedKind == nil || package.kind == selectedKind
+            let matchesVersionCount = showsOnlyMultipleVersions == false || package.installedVersions.count > 1
+            let matchesUpgradeStatus = selectedUpgradeStatus == nil
+                || upgradeResults[package.id]?.status == selectedUpgradeStatus
+            let matchesSearch = searchText.isEmpty
+                || package.name.localizedStandardContains(searchText)
+                || package.summary.localizedStandardContains(searchText)
+            return matchesKind && matchesVersionCount && matchesUpgradeStatus && matchesSearch
+        }
+        filteredPackages = sortOption.sorted(matchingPackages)
+    }
+
+    /// Maps streamed Homebrew progress back to installed package identities.
+    private func recordBulkUpgradeProgress(_ message: String) {
+        if let packageID = packageID(fromUpgradeProgress: message) {
+            activeBulkUpgradePackageID = packageID
+            bulkUpgradePackageIDs.insert(packageID)
+            return
+        }
+
+        guard message.hasPrefix("Error:") else { return }
+        let failedPackageID = activeBulkUpgradePackageID ?? packageID(mentionedIn: message)
+        if let failedPackageID {
+            bulkUpgradePackageIDs.insert(failedPackageID)
+            bulkUpgradeFailureMessages[failedPackageID] = message
+        }
+    }
+
+    /// Publishes package outcomes once the bulk Homebrew command exits.
+    private func finalizeBulkUpgradeResults(overallErrorMessage: String? = nil) {
+        if let overallErrorMessage,
+           bulkUpgradeFailureMessages.isEmpty,
+           let activeBulkUpgradePackageID {
+            bulkUpgradeFailureMessages[activeBulkUpgradePackageID] = overallErrorMessage
+        }
+
+        for packageID in bulkUpgradePackageIDs {
+            if let message = bulkUpgradeFailureMessages[packageID] {
+                upgradeResults[packageID] = PackageUpgradeResult(status: .failed, message: message)
+            } else {
+                upgradeResults[packageID] = PackageUpgradeResult(status: .succeeded)
+            }
+        }
+
+        activeBulkUpgradePackageID = nil
+        bulkUpgradePackageIDs = []
+        bulkUpgradeFailureMessages = [:]
+        repairSelectionIfUpgradeFilterIsActive()
+    }
+
+    /// Finds an installed package at the start of an `Upgrading …` progress message.
+    private func packageID(fromUpgradeProgress message: String) -> InstalledPackageDTO.ID? {
+        let prefix = "Upgrading "
+        guard message.hasPrefix(prefix) else { return nil }
+        let packageDescription = message.dropFirst(prefix.count)
+
+        return packages
+            .sorted { $0.name.count > $1.name.count }
+            .first { package in
+                packageDescription == package.name
+                    || packageDescription.hasPrefix("\(package.name) ")
+                    || packageDescription.hasPrefix("\(package.name):")
+            }?
+            .id
+    }
+
+    /// Finds the longest installed package name mentioned in a Homebrew error.
+    private func packageID(mentionedIn message: String) -> InstalledPackageDTO.ID? {
+        packages
+            .sorted { $0.name.count > $1.name.count }
+            .first { message.localizedStandardContains($0.name) }?
+            .id
+    }
+
+    /// Keeps selection aligned when operation results change an active result filter.
+    private func repairSelectionIfUpgradeFilterIsActive() {
+        guard selectedUpgradeStatus != nil else { return }
+        repairSelection()
     }
 
     /// Reconciles live package snapshots with the SwiftData cache.
