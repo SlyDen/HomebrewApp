@@ -12,13 +12,15 @@ The package browser opens as a two-column SwiftUI split view. The sidebar lists 
 
 The main window opens at a comfortable ideal size, supports a smaller tested minimum size, and remains freely resizable above that minimum. Long command-progress messages truncate in the console dock instead of increasing the window's minimum width.
 
-![Filter menu showing all packages, formulae, casks, and the multiple-versions toggle.](package-filter.png)
+![Filter menu showing package type and multiple-version choices.](package-filter.png)
 
 The browser supports:
 
 - Search across package names and summaries.
+- A visible Filters menu with an active-filter count and one-click reset.
 - Filtering by formula or cask.
 - A multiple-versions filter for packages that need cleanup or version review.
+- Latest-upgrade filters for successfully upgraded packages and package errors.
 - Selection repair when filters or refreshes change the visible package list.
 - Provider-aware empty states when Homebrew is disabled.
 

@@ -208,6 +208,10 @@ struct HomebrewAppTests {
             ) == "Waiting for administrator password for docker"
         )
         #expect(HomebrewOutputParser.progressMessage(from: "Already up-to-date.") == nil)
+        #expect(
+            HomebrewOutputParser.progressMessage(from: "Error: git: upgrade failed")
+                == "Error: git: upgrade failed"
+        )
     }
 
     @Test func createsPrivateAskpassHelper() throws {
@@ -233,6 +237,7 @@ struct HomebrewAppTests {
         )
         return ModelContext(container)
     }
+
 }
 
 enum RecordedHomebrewOperation: Equatable, Sendable {

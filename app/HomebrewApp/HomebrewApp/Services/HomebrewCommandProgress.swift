@@ -82,6 +82,10 @@ struct HomebrewOutputParser {
             return "Waiting for administrator password"
         }
 
+        if line.hasPrefix("Error:") {
+            return line
+        }
+
         guard line.hasPrefix("==> ") else { return nil }
         let message = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
         let meaningfulPrefixes = [

@@ -34,6 +34,14 @@ struct PackageListView: View {
                     }
                     .disabled(library.isLoading || !isHomebrewProviderEnabled)
 
+                    PackageFilterMenu(
+                        selectedKind: $library.selectedKind,
+                        showsOnlyMultipleVersions: $library.showsOnlyMultipleVersions,
+                        selectedUpgradeStatus: $library.selectedUpgradeStatus,
+                        activeFilterCount: library.activeFilterCount,
+                        clearFilters: library.clearPackageFilters
+                    )
+
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal)
@@ -42,9 +50,15 @@ struct PackageListView: View {
                 Divider()
 
                 List(displayedPackages, selection: $library.selectedPackageID) { package in
-                    PackageRow(package: package)
+                    let upgradeResult = library.upgradeResults[package.id]
+                    PackageRow(package: package, upgradeResult: upgradeResult)
                         .tag(package.id)
-                        .listRowBackground(appearancePreference.palette.sidebar.opacity(0.62))
+                        .listRowBackground(
+                            PackageUpgradeRowBackground(
+                                baseColor: appearancePreference.palette.sidebar.opacity(0.62),
+                                status: upgradeResult?.status
+                            )
+                        )
                 }
                 .scrollContentBackground(.hidden)
                 .background(appearancePreference.palette.sidebar)
@@ -69,13 +83,6 @@ struct PackageListView: View {
                 }
             }
             .toolbar {
-                ToolbarItem {
-                    KindFilterMenu(
-                        selectedKind: $library.selectedKind,
-                        showsOnlyMultipleVersions: $library.showsOnlyMultipleVersions
-                    )
-                }
-
                 ToolbarItem {
                     PackageSortMenu(sortOption: $library.sortOption)
                 }
@@ -167,6 +174,9 @@ struct PackageListView: View {
         .onChange(of: library.showsOnlyMultipleVersions) { _, _ in
             library.repairSelection()
         }
+        .onChange(of: library.selectedUpgradeStatus) { _, _ in
+            library.repairSelection()
+        }
         .onChange(of: isHomebrewProviderEnabled) { _, isEnabled in
             if isEnabled {
                 library.repairSelection()
@@ -212,42 +222,6 @@ struct PackageListView: View {
                 cleanupAfterUpgrade: cleanupAfterUpgrade,
                 from: modelContext
             )
-        }
-    }
-}
-
-/// Toolbar menu for filtering package results.
-private struct KindFilterMenu: View {
-    /// Currently selected package kind, or `nil` for all packages.
-    @Binding var selectedKind: ManagedPackageKind?
-
-    /// Whether only packages with more than one installed version are shown.
-    @Binding var showsOnlyMultipleVersions: Bool
-
-    /// Filter menu body.
-    var body: some View {
-        Menu {
-            Button {
-                selectedKind = nil
-            } label: {
-                Label("All", systemImage: selectedKind == nil ? "checkmark" : "line.3.horizontal.decrease.circle")
-            }
-
-            ForEach(ManagedPackageKind.allCases) { kind in
-                Button {
-                    selectedKind = kind
-                } label: {
-                    Label(kind.title, systemImage: selectedKind == kind ? "checkmark" : kind.systemImage)
-                }
-            }
-
-            Divider()
-
-            Toggle(isOn: $showsOnlyMultipleVersions) {
-                Label("Multiple Versions", systemImage: "square.stack.3d.up")
-            }
-        } label: {
-            Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
         }
     }
 }
