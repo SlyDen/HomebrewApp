@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Availability flags reported by the formula registry.
+/// Availability flags reported for one catalog package.
 struct FormulaAvailabilitySection: View {
+    let kind: ManagedPackageKind
     let isDeprecated: Bool
     let isDisabled: Bool
     let hasBottle: Bool
@@ -21,19 +22,21 @@ struct FormulaAvailabilitySection: View {
                     .foregroundStyle(.green)
             }
 
-            LabeledContent("Prebuilt Bottle") {
-                if hasBottle {
-                    Text("Available")
-                } else {
-                    Text("Not reported")
+            if kind == .formula {
+                LabeledContent("Prebuilt Bottle") {
+                    if hasBottle {
+                        Text("Available")
+                    } else {
+                        Text("Not reported")
+                    }
                 }
-            }
 
-            LabeledContent("Keg Only") {
-                if isKegOnly {
-                    Text("Yes")
-                } else {
-                    Text("No")
+                LabeledContent("Keg Only") {
+                    if isKegOnly {
+                        Text("Yes")
+                    } else {
+                        Text("No")
+                    }
                 }
             }
         }

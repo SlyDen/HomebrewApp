@@ -1,14 +1,15 @@
 import SwiftUI
 
-/// Primary formula identity, summary, version, and external links.
+/// Primary package identity, summary, version, and external links.
 struct FormulaRegistryHeader: View {
     let name: String
+    let kind: ManagedPackageKind
     let summary: String?
     let stableVersion: String?
     let homepage: URL?
     let registryPage: URL?
 
-    /// Header body for the selected formula.
+    /// Header body for the selected package.
     var body: some View {
         VStack(alignment: .leading) {
             Label {
@@ -23,7 +24,7 @@ struct FormulaRegistryHeader: View {
                     }
                 }
             } icon: {
-                Image(systemName: "shippingbox.fill")
+                Image(systemName: kind.systemImage)
                     .font(.title2)
                     .symbolRenderingMode(.hierarchical)
             }

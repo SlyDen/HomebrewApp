@@ -6,6 +6,8 @@ Run Homebrew maintenance tasks from the selected package detail view.
 
 The detail pane surfaces the selected package's metadata, installed versions, and available package operations. Actions are delegated back to `PackageLibrary`, which logs the command, calls the active package service, and refreshes package state when the command completes.
 
+The Discover catalog also delegates new installations to `PackageLibrary`. Formulae use `brew install --formula`, casks use `brew install --cask`, and tap-provided packages retain their fully qualified `user/repository/package` names through command execution and installed-state refresh.
+
 ![Package detail screen with package actions, installed versions, and metadata.](package-browser.png)
 
 Package-level actions include:
