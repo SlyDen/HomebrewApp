@@ -21,7 +21,8 @@ Use HomebrewApp to:
 - Inspect package details including homepage links, install dates, identifiers, and installed versions.
 - Run package actions such as upgrade, reinstall, force reinstall, delete, make active, and version-specific delete.
 - Upgrade every outdated, unpinned package at once, with optional cleanup enabled by default.
-- Watch refreshes and package operations in a color-coded console panel.
+- Review per-package success and failure badges from the latest upgrade, then filter the package list by result.
+- Watch ordered refresh and package-operation progress in a color-coded console panel through the final command message.
 - Resize the main window without transient command output changing its minimum size.
 - Export the current package inventory as formatted JSON.
 - Tune app appearance and active package providers from the macOS Settings window.

@@ -24,6 +24,8 @@ The browser supports:
 - Selection repair when filters or refreshes change the visible package list.
 - Provider-aware empty states when Homebrew is disabled.
 
+Bulk-upgrade results remain attached to their package rows for the current app session. Successful packages show a green status, while failures show a red status and preserve Homebrew's package-specific message. If stdout and stderr arrive close together, an error that names a package is assigned to that package instead of whichever package most recently reported progress.
+
 ## Data Flow
 
 `PackageLibrary` owns the observable list state and publishes `filteredPackages` to the view. Live refreshes flow through `HomebrewServicing`, then the resulting `InstalledPackageDTO` snapshots are persisted as `BrewPackage` and `BrewVersion` records for fast startup on the next launch.
